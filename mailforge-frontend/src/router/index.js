@@ -31,6 +31,12 @@ const routes = [
         component: () => import("@/views/ComposeView.vue"),
       },
       {
+        path: "campaigns/:id/edit",
+        name: "campaign-edit",
+        component: () => import("@/views/ComposeView.vue"),
+        props: true,
+      },
+      {
         path: "contacts",
         name: "contacts",
         component: () => import("@/views/ContactsView.vue"),
@@ -55,7 +61,10 @@ const routes = [
   { path: "/:pathMatch(.*)*", redirect: "/dashboard" },
 ];
 
-const router = createRouter({ history: createWebHistory(), routes });
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+});
 
 router.beforeEach((to) => {
   if (!getActivePinia()) return;

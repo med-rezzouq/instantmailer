@@ -15,7 +15,6 @@ from app.dependencies import get_current_user
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
 
-
 async def _campaign_to_out(db: AsyncSession, campaign: Campaign) -> CampaignOut:
     ordered_steps = sorted(campaign.steps or [], key=lambda x: x.step_number)
 
@@ -41,11 +40,19 @@ async def _campaign_to_out(db: AsyncSession, campaign: Campaign) -> CampaignOut:
         user_id=campaign.user_id,
         name=campaign.name,
         status=campaign.status,
+        preview_text=campaign.preview_text,
+        from_name=campaign.from_name,
+        reply_to=campaign.reply_to,
         segment_tags=campaign.segment_tags or [],
         track_opens=campaign.track_opens,
         track_clicks=campaign.track_clicks,
         is_followup=campaign.is_followup,
         parent_campaign_id=campaign.parent_campaign_id,
+        max_bounces=campaign.max_bounces,
+        max_complaints=campaign.max_complaints,
+        max_unsubscribes=campaign.max_unsubscribes,
+        stopped_by_condition=campaign.stopped_by_condition,
+        stop_reason=campaign.stop_reason,
         total_contacts=campaign.total_contacts or 0,
         new_contacts_since_send=campaign.new_contacts_since_send or 0,
         created_at=campaign.created_at,

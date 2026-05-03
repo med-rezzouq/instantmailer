@@ -1,11 +1,27 @@
-node_modules/
+# Python
 __pycache__/
-.venv/
-venv/
-.env
-*.pyc
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
+.venv/
+venv/
+env/
+ENV/
 dist/
 build/
 *.egg-info/
+
+# Node
+node_modules/
+vite.svg
+*.log
+
+# Env files
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

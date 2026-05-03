@@ -1,3 +1,16 @@
+--run tree of project 
+tree /f
+
+--create migration file 
+docker exec -it mailforge-api alembic revision -m "add from_name and reply_to to campaigns"
+
+--make upgrade 
+docker exec -it mailforge-api alembic upgrade head
+
+--show last error logs
+docker logs --tail 120 mailforge-api 
+
+
 -------------SUMMARIZE--------------
 
 so the entry point is the root main.py there we create a fastapi function and add the necessary routes that we import from all routers/files
@@ -64,7 +77,7 @@ for the delay to send followup from initial email need to be from each last sent
 
 
 
-
+for the delay to send followup from initial email need to be from each last sent email to this contact not from the initial one, so i need a pivote table which includes the campaign id, sequence email id and the contact id and date of last email sent to him, and to know 
 
 
 
