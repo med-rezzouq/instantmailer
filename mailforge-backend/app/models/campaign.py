@@ -14,6 +14,7 @@ class CampaignStatus(str, enum.Enum):
     paused = "paused"
     outdated = "outdated"
     failed = "failed"
+    stopped = "stopped"
 
 
 class EmailProvider(str, enum.Enum):
@@ -30,20 +31,26 @@ class Campaign(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
-    status = Column(Enum(CampaignStatus), default=CampaignStatus.draft)
-    max_bounces = Column(Integer, nullable=True)
-    max_complaints = Column(Integer, nullable=True)
-    max_unsubscribes = Column(Integer, nullable=True)
+    status = Column(Enum(CampaignStatus), default=CampaignStatus.draft, nullable=False)
+    preview_text = Column(String, nullable=True)
+    from_name = Column(String, nullable=True)
+    reply_to = Column(String, nullable=True)
+    max_bounces = Column(Integer, nullable=False, default=0)
+    max_complaints = Column(Integer, nullable=False, default=0)
+    max_unsubscribes = Column(Integer, nullable=False, default=0)
+
     stopped_by_condition = Column(Boolean, default=False, nullable=False)
     stop_reason = Column(String, nullable=True)
 
-    segment_tags = Column("segment_tags", JSON, default=[])
-    track_opens = Column("track_opens", Boolean, default=True)
-    track_clicks = Column("track_clicks", Boolean, default=True)
-    is_followup = Column("is_followup", Boolean, default=False)
+    segment_tags = Column("segment_tags", JSON, default=list)
+    track_opens = Column("track_opens", Boolean, default=True, nullable=False)
+    track_clicks = Column("track_clicks", Boolean, default=True, nullable=False)
+    is_followup = Column("is_followup", Boolean, default=False, nullable=False)
     parent_campaign_id = Column("parent_campaign_id", Integer, ForeignKey("campaigns.id"), nullable=True)
-    total_contacts = Column("total_contacts", Integer, default=0)
-    new_contacts_since_send = Column("new_contacts_since_send", Integer, default=0)
+
+    total_contacts = Column("total_contacts", Integer, default=0, nullable=False)
+    new_contacts_since_send = Column("new_contacts_since_send", Integer, default=0, nullable=False)
+
     created_at = Column("created_at", DateTime(timezone=True), server_default=func.now())
     updated_at = Column("updated_at", DateTime(timezone=True), onupdate=func.now())
     sent_at = Column("sent_at", DateTime(timezone=True), nullable=True)

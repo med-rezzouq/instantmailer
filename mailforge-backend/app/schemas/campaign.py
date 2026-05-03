@@ -69,6 +69,9 @@ class CampaignStepOut(CampaignStepBase):
 
 class CampaignCreate(BaseModel):
     name: str
+    preview_text: Optional[str] = None
+    from_name: Optional[str] = None
+    reply_to: Optional[str] = None
     segment_tags: List[str] = Field(default_factory=list)
     track_opens: bool = True
     track_clicks: bool = True
@@ -79,13 +82,13 @@ class CampaignCreate(BaseModel):
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
-    
+
     steps: List[CampaignStepCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_steps(self):
         if not self.steps:
-            raise ValueError("Campaign must contain at least one step")
+            return self
 
         step_numbers = [step.step_number for step in self.steps]
         if len(step_numbers) != len(set(step_numbers)):
@@ -112,6 +115,9 @@ class CampaignCreate(BaseModel):
 
 class CampaignUpdate(BaseModel):
     name: Optional[str] = None
+    preview_text: Optional[str] = None
+    from_name: Optional[str] = None
+    reply_to: Optional[str] = None
     status: Optional[CampaignStatus] = None
     segment_tags: Optional[List[str]] = None
     track_opens: Optional[bool] = None
@@ -162,12 +168,16 @@ class CampaignOut(BaseModel):
     user_id: int
     name: str
     status: CampaignStatus
+    preview_text: Optional[str] = None
+    from_name: Optional[str] = None
+    reply_to: Optional[str] = None
 
     segment_tags: List[str] = Field(default_factory=list)
     track_opens: bool
     track_clicks: bool
     is_followup: bool
     parent_campaign_id: Optional[int] = None
+    max_bounces: Optional[int] = 0
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
     stopped_by_condition: bool = False

@@ -323,21 +323,21 @@ async def process_campaign_followups(
                 
 async def evaluate_campaign_stop_conditions(db, campaign):
     if campaign.max_bounces is not None and campaign.bounce_count >= campaign.max_bounces:
-        campaign.status = "stopped"
+        campaign.status = CampaignStatus.stopped
         campaign.stopped_by_condition = True
         campaign.stop_reason = "max_bounces_reached"
         await db.commit()
         return True
 
     if campaign.max_complaints is not None and campaign.complaint_count >= campaign.max_complaints:
-        campaign.status = "stopped"
+        campaign.status = CampaignStatus.stopped
         campaign.stopped_by_condition = True
         campaign.stop_reason = "max_complaints_reached"
         await db.commit()
         return True
 
     if campaign.max_unsubscribes is not None and campaign.unsubscribe_count >= campaign.max_unsubscribes:
-        campaign.status = "stopped"
+        campaign.status = CampaignStatus.stopped
         campaign.stopped_by_condition = True
         campaign.stop_reason = "max_unsubscribes_reached"
         await db.commit()
