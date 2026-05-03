@@ -1,0 +1,224 @@
+import asyncio
+import argparse
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
+
+from app.database import AsyncSessionLocal
+from app.models.user import User
+from app.models.contact import Contact, ContactTag
+from app.models.template import EmailTemplate
+from app.models.smtp_config import SMTPConfig
+from app.models.campaign import Campaign, CampaignStatus, CampaignRecipient, EmailProvider
+from app.models.campaign_step import CampaignStep, StepType, DelayFrom, DelayUnit
+from app.models.campaign_sender import CampaignSender, SenderType
+
+
+async def get_or_create_user(session):
+    result = await session.execute(
+        select(User).where(User.id == 1)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise ValueError("User with id=1 not found.")
+
+    return user
+
+
+async def get_or_create_tags(session, user_id):
+    tags_data = ["Lead", "Customer", "Trial", "VIP"]
+    tags = []
+
+    for name in tags_data:
+        result = await session.execute(
+            select(ContactTag).where(ContactTag.user_id == user_id, ContactTag.name == name)
+        )
+        tag = result.scalar_one_or_none()
+        if not tag:
+            tag = ContactTag(user_id=user_id, name=name)
+            session.add(tag)
+            await session.flush()
+        tags.append(tag)
+
+    return tags
+
+
+async def get_or_create_contacts(session, user_id):
+    contacts_data = [
+        ("alice@example.com", "Alice", "Johnson"),
+        ("bob@example.com", "Bob", "Smith"),
+        ("charlie@example.com", "Charlie", "Brown"),
+        ("diana@example.com", "Diana", "Prince"),
+        ("eric@example.com", "Eric", "Miller"),
+    ]
+
+    contacts = []
+    for email, first_name, last_name in contacts_data:
+        result = await session.execute(
+            select(Contact).where(Contact.user_id == user_id, Contact.email == email)
+        )
+        contact = result.scalar_one_or_none()
+        if not contact:
+            contact = Contact(
+                user_id=user_id,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                is_subscribed=True,
+                open_count=0,
+                click_count=0,
+            )
+            session.add(contact)
+            await session.flush()
+        contacts.append(contact)
+
+    return contacts
+
+
+async def get_or_create_template(session, user_id):
+    result = await session.execute(
+        select(EmailTemplate).where(
+            EmailTemplate.user_id == user_id,
+            EmailTemplate.name == "Welcome Template",
+        )
+    )
+    template = result.scalar_one_or_none()
+    if template:
+        return template
+
+    template = EmailTemplate(
+        user_id=user_id,
+        name="Welcome Template",
+        subject="Welcome!",
+        html_content="<p>Hello {{ first_name }}, welcome!</p>",
+        text_content="Hello {{ first_name }}, welcome!",
+    )
+    session.add(template)
+    await session.flush()
+    return template
+
+
+
+async def get_or_create_smtp_config(session, user_id):
+    result = await session.execute(
+        select(SMTPConfig).where(SMTPConfig.user_id == user_id)
+    )
+    smtp_config = result.scalar_one_or_none()
+    if smtp_config:
+        return smtp_config
+
+    smtp_config = SMTPConfig(
+        user_id=user_id,
+        name="Demo SMTP",
+        host="smtp.example.com",
+        port=587,
+        username="demo@example.com",
+        password="demo-password",
+        use_tls=True,
+        use_ssl=False,
+        from_email="demo@example.com",
+        from_name="Demo User",
+        is_active=True,
+    )
+    session.add(smtp_config)
+    await session.flush()
+    return smtp_config
+
+
+async def create_campaign(session, user, contacts, smtp_config):
+    campaign = Campaign(
+        user_id=user.id,
+        name="Demo Campaign",
+        status=CampaignStatus.draft,
+        segment_tags=[],
+        track_opens=True,
+        track_clicks=True,
+        is_followup=False,
+        total_contacts=len(contacts),
+        new_contacts_since_send=0,
+        scheduled_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    session.add(campaign)
+    await session.flush()
+
+    sender = CampaignSender(
+        campaign_id=campaign.id,
+        sender_type=SenderType.smtp,
+        sender_id=smtp_config.id,
+        sender_label=f"{smtp_config.from_name} <{smtp_config.from_email}>",
+        quota=len(contacts),
+        sent_count=0,
+    )
+    session.add(sender)
+
+    step = CampaignStep(
+        campaign_id=campaign.id,
+        step_number=1,
+        step_type=StepType.initial,
+        name="Initial Outreach",
+        subject="Quick introduction",
+        html_body="<p>Hello {{first_name}}, just reaching out to introduce MailForge.</p>",
+        plain_body="Hello {{first_name}}, just reaching out to introduce MailForge.",
+        delay_value=0,
+        delay_unit=DelayUnit.days,
+        delay_from=DelayFrom.most_recent,
+        stop_on_reply=True,
+        is_active=True,
+    )
+    session.add(step)
+
+    for contact in contacts:
+        recipient = CampaignRecipient(
+            campaign_id=campaign.id,
+            contact_id=contact.id,
+            status="pending",
+            provider=EmailProvider.smtp,
+            sent_at=None,
+            error=None,
+        )
+        session.add(recipient)
+
+    await session.flush()
+    return campaign
+
+
+async def main(seed_part: str = "all"):
+    async with AsyncSessionLocal() as session:
+        user = await get_or_create_user(session)
+
+        if seed_part in ("all", "tags"):
+            await get_or_create_tags(session, user.id)
+
+        contacts = []
+        if seed_part in ("all", "contacts"):
+            contacts = await get_or_create_contacts(session, user.id)
+
+        if seed_part in ("all", "template"):
+            await get_or_create_template(session, user.id)
+
+        smtp_config = None
+        if seed_part in ("all", "smtp", "campaign"):
+            smtp_config = await get_or_create_smtp_config(session, user.id)
+
+        if seed_part == "campaign":
+            if not contacts:
+                contacts = await get_or_create_contacts(session, user.id)
+            if not smtp_config:
+                smtp_config = await get_or_create_smtp_config(session, user.id)
+            campaign = await create_campaign(session, user, contacts, smtp_config)
+            print(f"Campaign seed complete. Campaign ID: {campaign.id}")
+
+        await session.commit()
+        print(f"Seed complete. Mode: {seed_part}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--only",
+        choices=["all", "tags", "contacts", "template", "smtp", "campaign"],
+        default="all",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(args.only))

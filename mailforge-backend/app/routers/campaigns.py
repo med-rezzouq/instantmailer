@@ -1,0 +1,267 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from typing import List
+
+from app.database import get_db
+from app.models.user import User
+from app.models.campaign import Campaign, CampaignStatus
+from app.models.campaign_step import CampaignStep
+from app.schemas.campaign import CampaignCreate, CampaignUpdate, CampaignOut
+from app.services.email_service import send_campaign
+from app.services.campaign_sequence_service import process_campaign_followups
+from app.dependencies import get_current_user
+
+router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+
+
+async def _campaign_to_out(db: AsyncSession, campaign: Campaign) -> CampaignOut:
+    ordered_steps = sorted(campaign.steps or [], key=lambda x: x.step_number)
+
+    initial_step = next(
+        (
+            step
+            for step in ordered_steps
+            if getattr(step.step_type, "value", step.step_type) == "initial"
+        ),
+        None,
+    )
+
+    followup_count = len(
+        [
+            step
+            for step in ordered_steps
+            if getattr(step.step_type, "value", step.step_type) != "initial"
+        ]
+    )
+
+    return CampaignOut(
+        id=campaign.id,
+        user_id=campaign.user_id,
+        name=campaign.name,
+        status=campaign.status,
+        segment_tags=campaign.segment_tags or [],
+        track_opens=campaign.track_opens,
+        track_clicks=campaign.track_clicks,
+        is_followup=campaign.is_followup,
+        parent_campaign_id=campaign.parent_campaign_id,
+        total_contacts=campaign.total_contacts or 0,
+        new_contacts_since_send=campaign.new_contacts_since_send or 0,
+        created_at=campaign.created_at,
+        updated_at=campaign.updated_at,
+        sent_at=campaign.sent_at,
+        scheduled_at=campaign.scheduled_at,
+        subject=initial_step.subject if initial_step else None,
+        html_content=initial_step.html_body if initial_step else None,
+        plain_content=initial_step.plain_body if initial_step else None,
+        followup_count=followup_count,
+        steps=ordered_steps,
+    )
+
+
+@router.post("/{campaign_id}/process-followups")
+async def process_followups(
+    campaign_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        result = await db.execute(
+            select(Campaign).where(
+                Campaign.id == campaign_id,
+                Campaign.user_id == current_user.id,
+            )
+        )
+        campaign = result.scalar_one_or_none()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        return await process_campaign_followups(
+            campaign_id=campaign_id,
+            user_id=current_user.id,
+            db=db,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("", response_model=List[CampaignOut])
+async def list_campaigns(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Campaign)
+        .where(Campaign.user_id == current_user.id)
+        .options(
+            selectinload(Campaign.steps),
+            selectinload(Campaign.senders),
+        )
+        .offset(skip)
+        .limit(limit)
+    )
+    campaigns = result.scalars().unique().all()
+    return [await _campaign_to_out(db, campaign) for campaign in campaigns]
+
+
+@router.post("", response_model=CampaignOut, status_code=201)
+async def create_campaign(
+    payload: CampaignCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    data = payload.model_dump(exclude={"steps"})
+
+    campaign = Campaign(
+        user_id=current_user.id,
+        **data,
+    )
+    db.add(campaign)
+    await db.flush()
+
+    for step in payload.steps:
+        db.add(
+            CampaignStep(
+                campaign_id=campaign.id,
+                step_number=step.step_number,
+                step_type=step.step_type,
+                name=step.name,
+                subject=step.subject,
+                html_body=step.html_body,
+                plain_body=step.plain_body,
+                delay_value=step.delay_value,
+                delay_unit=step.delay_unit,
+                delay_from=step.delay_from,
+                stop_on_reply=step.stop_on_reply,
+                is_active=step.is_active,
+            )
+        )
+
+    await db.commit()
+
+    result = await db.execute(
+        select(Campaign)
+        .where(Campaign.id == campaign.id)
+        .options(
+            selectinload(Campaign.steps),
+            selectinload(Campaign.senders),
+        )
+    )
+    campaign = result.scalar_one()
+    return await _campaign_to_out(db, campaign)
+
+
+@router.get("/{campaign_id}", response_model=CampaignOut)
+async def get_campaign(
+    campaign_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Campaign)
+        .where(Campaign.id == campaign_id, Campaign.user_id == current_user.id)
+        .options(
+            selectinload(Campaign.steps),
+            selectinload(Campaign.senders),
+        )
+    )
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return await _campaign_to_out(db, campaign)
+
+
+@router.put("/{campaign_id}", response_model=CampaignOut)
+async def update_campaign(
+    campaign_id: int,
+    payload: CampaignUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Campaign)
+        .where(Campaign.id == campaign_id, Campaign.user_id == current_user.id)
+        .options(
+            selectinload(Campaign.steps),
+            selectinload(Campaign.senders),
+        )
+    )
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if campaign.status == CampaignStatus.completed:
+        raise HTTPException(status_code=400, detail="Cannot edit a completed campaign")
+
+    data = payload.model_dump(exclude_unset=True, exclude={"steps"})
+    for field, value in data.items():
+        setattr(campaign, field, value)
+
+    if payload.steps is not None:
+        for step in list(campaign.steps or []):
+            await db.delete(step)
+        await db.flush()
+
+        for step in payload.steps:
+            db.add(
+                CampaignStep(
+                    campaign_id=campaign.id,
+                    step_number=step.step_number,
+                    step_type=step.step_type,
+                    name=step.name,
+                    subject=step.subject,
+                    html_body=step.html_body,
+                    plain_body=step.plain_body,
+                    delay_value=step.delay_value,
+                    delay_unit=step.delay_unit,
+                    delay_from=step.delay_from,
+                    stop_on_reply=step.stop_on_reply,
+                    is_active=step.is_active,
+                )
+            )
+
+    await db.commit()
+
+    result = await db.execute(
+        select(Campaign)
+        .where(Campaign.id == campaign.id)
+        .options(
+            selectinload(Campaign.steps),
+            selectinload(Campaign.senders),
+        )
+    )
+    campaign = result.scalar_one()
+    return await _campaign_to_out(db, campaign)
+
+
+@router.delete("/{campaign_id}", status_code=204)
+async def delete_campaign(
+    campaign_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign or campaign.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    await db.delete(campaign)
+    await db.commit()
+
+
+@router.post("/{campaign_id}/send")
+async def send(
+    campaign_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        campaign = await db.get(Campaign, campaign_id)
+        if not campaign or campaign.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        return await send_campaign(campaign_id, current_user.id, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

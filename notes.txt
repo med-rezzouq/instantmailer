@@ -1,0 +1,75 @@
+-------------SUMMARIZE--------------
+
+so the entry point is the root main.py there we create a fastapi function and add the necessary routes that we import from all routers/files
+app.state.limiter = limiter , here we assigned this  limiter as global variable to be known in the app instance, its useful to limit number of requests per ip to avoid dos attacks or system overload. 
+The "router = APIRouter(prefix="/auth", tags=["Authentication"])"  is the prefix so we say all the path requests in this file are preffixed by auth its like shortcut so register will become auth/register in the Postman or swagger, and tags is to group them in swagger.
+response_model is the schema that validâtes our response so if any datatype or missing key which is part of rokenreponse schema, this valdation will failed.
+
+
+so response_model=TokenResponse is for format of data to be returned 
+and UserRegister in payload: UserRegister is the schema data format for input
+Without get_current_user, every protected route would need to repeat the same auth logic:
+
+async def me(current_user: User = Depends(get_current_user)):  this is get_current_user adefined function in dependencies.py the result forwarded as param into currentuser function and User is the type to be returned, Without get_current_user, every protected route would need to repeat the same auth logic:
+
+ we can also write async def me(current_user = Depends(get_current_user)): and it will work.
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+
+http://localhost:5050
+admin@mailforge.com
+Admin
+
+open query tool from left icon called "query tool Workspace"
+then i choose my server mailforge and connect.
+
+---------------
+swagger 
+
+http://localhost:8000/docs
+-----------
+
+----- AUTHENTIFICATION ---------
+i need go swagger the auth/login and fill my email password, then save the token bearer in authorize button in top.
+
+--------------------------------
+
+when i do any edit i need to check again the contact list and Campaign list from the frontend then to ensure Nothing broke.
+-----------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------
+-------------  TO BE DONE ----------------------------------------
+
+so Global stop conditions i need only to configure total bounces to stop , or unsubscribes or reports/complaints
+
+each sequence will have contacts assigned to it and i need to have a middle condition calculator that how many followup emails or reply followups and to stop a sequence , so after all followups i stop followups but after his reply i send followup replies, and if i reach this followup reply for example 2 times then i stick only to reply him again without sending again followup reply. also need need to flag the complaigner and bounces, and remove them from the Campaign but flag them globally in the blacklist, and for the unsubscribers, i flag them only in the current Campaign but not globally because they can be used in other Campaign.
+
+
+for the delay to send followup from initial email need to be from each last sent email to this contact not from the initial one, so i need a pivote table which includes the campaign id, sequence email id and the contact id and date of last email sent to him, and to know 
+
+##so before sending iniftial followup check:
+-so we check if we dont have any reply by him first, because after his first reply, we need not send or use any followup sequence email, we use only followup replyes or normal replyes sequences.
+-if we sent less than 3 followups or defined number:
+-if he didnt reply so if we dont have a row sequence in pivote with his contactid as sender and datetime greater than any row which we were the sender.
+- based on his last sequence if he has a row in pivote where his reply was for initial followup we use now reply sequence email, 
+-it might be that he can reply to one of the followups after he do a reply to our last normal reply.
+
+##so before sending normal reply:
+- we see if we have at least one reply by selecting last pivote row where he was the sender and he own great date, it might be that he can reply to one of the followups after he do a reply to our last normal reply, so once we get a reply from his we disable all followup sequences for him.
+
+
+##so before sending followup reply we check:
+-if we didnt reach max of followup replies by counting from pivote
+- we check if he check if we already sent the normal reply, because if we didnt replied we need to use normal reply first.
+
+
+
+
+
+
+
+
+
+
+
+
+
