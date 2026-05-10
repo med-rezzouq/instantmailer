@@ -20,6 +20,10 @@ class CampaignStepBase(BaseModel):
     stop_on_reply: bool = True
     is_active: bool = True
 
+    # NEW: only used for reply_followup steps
+    wait_after_contact_reply_value: Optional[int] = Field(None, ge=0)
+    wait_after_contact_reply_unit: Optional[DelayUnit] = None
+
     @model_validator(mode="after")
     def validate_step_rules(self):
         if self.step_type == StepType.initial:
@@ -34,8 +38,14 @@ class CampaignStepBase(BaseModel):
         if self.step_type == StepType.reply_followup:
             if self.delay_from == DelayFrom.previous_step:
                 raise ValueError(
-                    "reply_followup steps cannot use delay_from='previous_step'; use their_reply, our_reply, or most_recent"
+                    "reply_followup steps cannot use delay_from='previous_step'; "
+                    "use their_reply, our_reply, or most_recent"
                 )
+            # optional: enforce that reply steps have contact-reply delay set
+            # if self.wait_after_contact_reply_value is None:
+            #     raise ValueError("reply_followup steps must define wait_after_contact_reply_value")
+            # if self.wait_after_contact_reply_unit is None:
+            #     raise ValueError("reply_followup steps must define wait_after_contact_reply_unit")
 
         return self
 
@@ -57,7 +67,9 @@ class CampaignStepUpdate(BaseModel):
     delay_from: Optional[DelayFrom] = None
     stop_on_reply: Optional[bool] = None
     is_active: Optional[bool] = None
-
+    # NEW
+    wait_after_contact_reply_value: Optional[int] = Field(None, ge=0)
+    wait_after_contact_reply_unit: Optional[DelayUnit] = None
 
 class CampaignStepOut(CampaignStepBase):
     id: int
@@ -82,6 +94,10 @@ class CampaignCreate(BaseModel):
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
+    max_followups: Optional[int] = None
+    # NEW: campaign-level warm-up delay
+    general_warmup_delay_value: int = 10
+    general_warmup_delay_unit: DelayUnit = DelayUnit.minutes
 
     steps: List[CampaignStepCreate] = Field(default_factory=list)
 
@@ -129,7 +145,10 @@ class CampaignUpdate(BaseModel):
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
-
+    max_followups: Optional[int] = None
+    # NEW
+    general_warmup_delay_value: Optional[int] = None
+    general_warmup_delay_unit: Optional[DelayUnit] = None
     steps: Optional[List[CampaignStepCreate]] = None
 
     @model_validator(mode="after")
@@ -180,6 +199,7 @@ class CampaignOut(BaseModel):
     max_bounces: Optional[int] = 0
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
+    max_followups: Optional[int] = None
     stopped_by_condition: bool = False
     stop_reason: Optional[str] = None
 
@@ -190,7 +210,9 @@ class CampaignOut(BaseModel):
     updated_at: Optional[datetime] = None
     sent_at: Optional[datetime] = None
     scheduled_at: Optional[datetime] = None
-
+    # NEW: warm-up config returned to frontend
+    general_warmup_delay_value: int
+    general_warmup_delay_unit: DelayUnit
     # temporary compatibility fields for frontend
     subject: Optional[str] = None
     html_content: Optional[str] = None

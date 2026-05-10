@@ -51,6 +51,7 @@ async def _campaign_to_out(db: AsyncSession, campaign: Campaign) -> CampaignOut:
         max_bounces=campaign.max_bounces,
         max_complaints=campaign.max_complaints,
         max_unsubscribes=campaign.max_unsubscribes,
+        max_followups=campaign.max_followups,
         stopped_by_condition=campaign.stopped_by_condition,
         stop_reason=campaign.stop_reason,
         total_contacts=campaign.total_contacts or 0,
@@ -64,8 +65,10 @@ async def _campaign_to_out(db: AsyncSession, campaign: Campaign) -> CampaignOut:
         plain_content=initial_step.plain_body if initial_step else None,
         followup_count=followup_count,
         steps=ordered_steps,
+        # NEW
+        general_warmup_delay_value=campaign.general_warmup_delay_value,
+        general_warmup_delay_unit=campaign.general_warmup_delay_unit,
     )
-
 
 @router.post("/{campaign_id}/process-followups")
 async def process_followups(
@@ -144,6 +147,8 @@ async def create_campaign(
                 delay_from=step.delay_from,
                 stop_on_reply=step.stop_on_reply,
                 is_active=step.is_active,
+                wait_after_contact_reply_value=step.wait_after_contact_reply_value,
+                wait_after_contact_reply_unit=step.wait_after_contact_reply_unit
             )
         )
 
@@ -188,6 +193,7 @@ async def update_campaign(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+
     result = await db.execute(
         select(Campaign)
         .where(Campaign.id == campaign_id, Campaign.user_id == current_user.id)
@@ -226,6 +232,8 @@ async def update_campaign(
                     delay_from=step.delay_from,
                     stop_on_reply=step.stop_on_reply,
                     is_active=step.is_active,
+                    wait_after_contact_reply_value=step.wait_after_contact_reply_value,
+                    wait_after_contact_reply_unit=step.wait_after_contact_reply_unit
                 )
             )
 
