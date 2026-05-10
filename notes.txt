@@ -1,14 +1,4 @@
---run tree of project 
-tree /f
-
---create migration file 
-docker exec -it mailforge-api alembic revision -m "add from_name and reply_to to campaigns"
-
---make upgrade 
-docker exec -it mailforge-api alembic upgrade head
-
---show last error logs
-docker logs --tail 120 mailforge-api 
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzc4MTEyNDE2LCJ0eXBlIjoiYWNjZXNzIn0.PineeQgXQQx3Yn4s_BzskPVDBrsTYgZzWmue5ElHgKc
 
 
 -------------SUMMARIZE--------------
@@ -75,14 +65,37 @@ for the delay to send followup from initial email need to be from each last sent
 - we check if he check if we already sent the normal reply, because if we didnt replied we need to use normal reply first.
 
 
-
+>we should add email sequence type.<<<<<<
 
 for the delay to send followup from initial email need to be from each last sent email to this contact not from the initial one, so i need a pivote table which includes the campaign id, sequence email id and the contact id and date of last email sent to him, and to know 
 
 
 
 
+-----------------------------------------
+------------------#######-------------------------
+-------------------------------------------
+
+you know first time when we send initial emails i want while doing this process if suddenly we recieve a reply, priority is on sending the normal reply not continuing with initial followup for other contacts, but also  i want set a delay per contact for any last email sent to him, depends the last eventtype sent to him. so the delay time i will set, is normallyy how much to waite after sending not how much waite before sending. so if i want send for example a followup i need go and see what is the last  sequence email type was sent to this contact if it is inital email i need take the geenral delay campaign, if it is a followup i need take the delay time set on this foolowup sequence if it is a normal reply so i need to set two delays in the reply sequence its the delay after contact last reply, and delay after reply, where the followup replies will use later. and also we set in follow up reply the delay after followup reply.
+
+also to not forget this period should not be less than the general warming delay time which i need to set also in the campaign, so ineed always check the last email sent what ever the type is in our campaign. so first check if general warming time is respected and if its less than the delay after set in a email sequence thats fine we just waite more to respect also the email sequence delay, but if its greater, we need then to waite until this general delay complete then we send because we followed this delay instead.
+
+for followup we use if we dont have any reply from the contact is the want marked as "stop after first reply" should an event sequence email which is not a reply sequence event, and also if it is any other event which is not has stop after first reply,
 
 
+i want to edit something else its about the maxi followups so what does mean this is an additional field in form in main configuration of a campaign where we need store an integer only.
+and then in backend before sending any normal followup where we dont have any recieved reply before, we need to not send other followup if we already reached this max followups configured on the campaign,
+opposite to reply followups, if we have a new reply sequence we need to start counting followup replies only after the last reply sequence and not from start and then if its reaching max followup value configred in campaign then we dont send,
+----------------------------
+###############
 
+i dont understand how you do one campaign run lets say it has 50000k contact and it can take about 1 week due to high delay , how can we have a continioous run or just know where to resume if suddenly something stopped like the script execution
+
+##############################
+
+yes but what if we iterate in our contacts and first contact we check which event he is in, then we saw we only see an initial email was sent and no followup yet,
+
+then we decided to move to next contacts where no one has also any reply, so normally this first contact we should sent a followup.
+
+i mean we need group contacts per their current step, then we proceed them, until we finnish a priority then we move to next group based on their next priority step
 

@@ -15,14 +15,22 @@ from app.models.campaign_sender import CampaignSender, SenderType
 
 
 async def get_or_create_user(session):
-    result = await session.execute(
-        select(User).where(User.id == 1)
+    # Try to fetch the first existing user
+    result = await session.execute(select(User).order_by(User.id))
+    user = result.scalars().first()
+
+    if user:
+        return user
+
+    # No users yet: create a default dev user
+    user = User(
+        email="med.rezzouq@gmail.com",
+        name="Dev User",
+        hashed_password="$2b$12$1B.oZ4t0UucFi0L8lV0j.ustv8dB5D/SXRf9Hh4/Qqfdo5q9kisQK",
+        is_active=True,
     )
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise ValueError("User with id=1 not found.")
-
+    session.add(user)
+    await session.flush()
     return user
 
 
@@ -46,11 +54,10 @@ async def get_or_create_tags(session, user_id):
 
 async def get_or_create_contacts(session, user_id):
     contacts_data = [
-        ("alice@example.com", "Alice", "Johnson"),
-        ("bob@example.com", "Bob", "Smith"),
-        ("charlie@example.com", "Charlie", "Brown"),
-        ("diana@example.com", "Diana", "Prince"),
-        ("eric@example.com", "Eric", "Miller"),
+        ("medrezzouq9@gmail.com", "Medrezzouq9", ""),
+        ("kora4yo@gmail.com", "Kora4yo", ""),
+        ("seriefilm@gmail.com", "Seriefilm", ""),
+        ("medelenx@gmail.com", "Medelenx", ""),
     ]
 
     contacts = []
@@ -76,23 +83,26 @@ async def get_or_create_contacts(session, user_id):
     return contacts
 
 
-async def get_or_create_template(session, user_id):
+async def get_or_create_template(session, user_id: int):
     result = await session.execute(
         select(EmailTemplate).where(
             EmailTemplate.user_id == user_id,
             EmailTemplate.name == "Welcome Template",
         )
     )
-    template = result.scalar_one_or_none()
+    template = result.scalars().first()
     if template:
         return template
 
     template = EmailTemplate(
         user_id=user_id,
         name="Welcome Template",
-        subject="Welcome!",
-        html_content="<p>Hello {{ first_name }}, welcome!</p>",
-        text_content="Hello {{ first_name }}, welcome!",
+        category="welcome",
+        html_content="""
+            <p>Hi {{ firstname }},</p>
+            <p>Welcome to MailForge! This is a demo template.</p>
+        """,
+        thumbnail=None,  # or a URL string if you have one
     )
     session.add(template)
     await session.flush()
@@ -113,7 +123,7 @@ async def get_or_create_smtp_config(session, user_id):
         name="Demo SMTP",
         host="smtp.example.com",
         port=587,
-        username="demo@example.com",
+        username="root",
         password="demo-password",
         use_tls=True,
         use_ssl=False,
@@ -132,6 +142,8 @@ async def create_campaign(session, user, contacts, smtp_config):
         name="Demo Campaign",
         status=CampaignStatus.draft,
         segment_tags=[],
+        from_name= "admin",
+        reply_to="admin@academicsights.com",
         track_opens=True,
         track_clicks=True,
         is_followup=False,

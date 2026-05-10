@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
     TRACKING_BASE_URL: str = "http://localhost:8000"
 
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_to: str | None = None
+    smtp_ssl: bool = False
+    smtp_starttls: bool = False
+    smtp_timeout: int = 15
+
     class Config:
         env_file = ".env"
 

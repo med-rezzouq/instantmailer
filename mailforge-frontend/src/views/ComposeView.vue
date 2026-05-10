@@ -1,3 +1,5 @@
+from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
+'''
 <template>
   <div>
     <div class="mb-6">
@@ -65,7 +67,6 @@
       </div>
     </div>
 
-    <!-- STEP 0 -->
     <div v-if="currentWizardStep === 0">
       <div class="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
         <div class="card">
@@ -124,6 +125,33 @@
             </div>
           </div>
 
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label class="form-label">General Warm-up Delay</label>
+              <div class="flex gap-2">
+                <input
+                  v-model.number="form.general_warmup_delay_value"
+                  type="number"
+                  min="0"
+                  class="form-input w-24"
+                  placeholder="10"
+                />
+                <select
+                  v-model="form.general_warmup_delay_unit"
+                  class="form-input flex-1"
+                >
+                  <option value="seconds">Seconds</option>
+                  <option value="minutes">Minutes</option>
+                  <option value="hours">Hours</option>
+                </select>
+              </div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Minimum time between any two emails sent to the same contact in
+                this campaign.
+              </p>
+            </div>
+          </div>
+
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
               <label class="form-label">Max Bounces</label>
@@ -156,6 +184,21 @@
                 class="form-input"
                 placeholder="0"
               />
+            </div>
+
+            <div>
+              <label class="form-label">Max Follow-ups per sequence</label>
+              <input
+                v-model.number="form.max_followups"
+                type="number"
+                min="0"
+                class="form-input"
+                placeholder="e.g. 3"
+              />
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Limits how many follow-up emails are sent before/after a reply
+                in this campaign. Leave empty for unlimited.
+              </p>
             </div>
           </div>
 
@@ -269,14 +312,12 @@
 
           <div class="card">
             <div class="font-bold mb-3 text-sm">Quick Templates</div>
-
             <div
               v-if="!templates.length"
               class="text-sm text-gray-400 dark:text-gray-600"
             >
               No templates yet
             </div>
-
             <button
               v-for="t in templates"
               :key="t.id"
@@ -300,7 +341,6 @@
       </div>
     </div>
 
-    <!-- STEP 1 -->
     <div v-if="currentWizardStep === 1">
       <div class="card mb-4">
         <div class="font-bold text-sm mb-4">Initial Email Body</div>
@@ -336,9 +376,9 @@
               @click="insertToken(token.value)"
               class="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
             >
-              <span class="font-mono text-primary dark:text-primary-dark">
-                {{ token.value }}
-              </span>
+              <span class="font-mono text-primary dark:text-primary-dark">{{
+                token.value
+              }}</span>
               <span class="text-gray-400 ml-2">{{ token.label }}</span>
             </button>
           </div>
@@ -349,6 +389,7 @@
           contenteditable="true"
           class="border border-border dark:border-border-dark rounded-b-lg p-4 min-h-[300px] bg-surface-off dark:bg-surface-dark-off focus:outline-none focus:border-primary dark:focus:border-primary-dark"
           style="color: inherit"
+          @input="initialHtmlBody = $event.target.innerHTML"
         ></div>
 
         <div class="flex justify-between mt-4">
@@ -374,11 +415,16 @@
       </div>
     </div>
 
-    <!-- STEP 2 -->
     <div v-if="currentWizardStep === 2">
       <div v-for="(fu, idx) in followups" :key="fu.id" class="card mb-4">
         <div class="flex items-center justify-between mb-4">
-          <div class="font-semibold">Follow-up {{ idx + 1 }}</div>
+          <div class="font-semibold">
+            {{
+              fu.is_reply_sequence
+                ? `Reply Sequence ${idx + 1}`
+                : `Follow-up ${idx + 1}`
+            }}
+          </div>
           <button
             type="button"
             class="text-red-500 text-sm"
@@ -390,18 +436,18 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
-            <label class="form-label">Wait Before Sending</label>
+            <label class="form-label">Wait after sending this sequence</label>
             <div class="flex gap-2">
               <input
                 v-model.number="fu.delayvalue"
                 type="number"
-                min="1"
+                min="0"
                 class="form-input w-24"
               />
               <select v-model="fu.delayunit" class="form-input flex-1">
+                <option value="seconds">Seconds</option>
+                <option value="minutes">Minutes</option>
                 <option value="hours">Hours</option>
-                <option value="days">Days</option>
-                <option value="weeks">Weeks</option>
               </select>
             </div>
           </div>
@@ -421,6 +467,38 @@
               <input type="checkbox" v-model="fu.stoponreply" />
               <span>Skip if replied</span>
             </label>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" v-model="fu.is_reply_sequence" />
+            <span>This is a reply sequence</span>
+          </label>
+        </div>
+
+        <div
+          v-if="fu.is_reply_sequence"
+          class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"
+        >
+          <div>
+            <label class="form-label">Wait after last contact reply</label>
+            <div class="flex gap-2">
+              <input
+                v-model.number="fu.wait_after_contact_reply_value"
+                type="number"
+                min="0"
+                class="form-input w-24"
+              />
+              <select
+                v-model="fu.wait_after_contact_reply_unit"
+                class="form-input flex-1"
+              >
+                <option value="seconds">Seconds</option>
+                <option value="minutes">Minutes</option>
+                <option value="hours">Hours</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -466,13 +544,11 @@
       </div>
     </div>
 
-    <!-- STEP 3 -->
     <div v-if="currentWizardStep === 3">
       <div class="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
         <div>
           <div class="card mb-4">
             <div class="font-bold text-sm mb-4">Campaign Overview</div>
-
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
@@ -482,7 +558,6 @@
                 </div>
                 <div class="text-sm font-semibold">{{ form.name }}</div>
               </div>
-
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -493,7 +568,17 @@
                   {{ form.subject }}
                 </div>
               </div>
-
+              <div
+                class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
+              >
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  General Warm-up Delay
+                </div>
+                <div class="text-sm font-semibold">
+                  {{ form.general_warmup_delay_value }}
+                  {{ form.general_warmup_delay_unit }}
+                </div>
+              </div>
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -502,7 +587,6 @@
                 </div>
                 <div class="text-sm font-semibold">{{ form.max_bounces }}</div>
               </div>
-
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -513,7 +597,6 @@
                   {{ form.max_unsubscribes }}
                 </div>
               </div>
-
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -524,9 +607,8 @@
                   {{ form.max_complaints }}
                 </div>
               </div>
-
               <div
-                class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
+                class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off md:col-span-2"
               >
                 <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
                   Segments
@@ -545,7 +627,6 @@
         <div>
           <div class="card mb-4">
             <div class="font-bold text-sm mb-4">Launch Campaign</div>
-
             <div class="space-y-3 mb-4">
               <label
                 class="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
@@ -563,7 +644,6 @@
                   </div>
                 </div>
               </label>
-
               <label
                 class="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
               >
@@ -581,7 +661,6 @@
                 </div>
               </label>
             </div>
-
             <button
               v-if="sendMode === 'draft'"
               class="btn btn-ghost w-full mb-2"
@@ -596,7 +675,6 @@
                     : "Save Draft"
               }}
             </button>
-
             <button
               v-if="sendMode === 'now'"
               class="btn btn-primary w-full"
@@ -634,6 +712,7 @@ const wizardSteps = [
   "Review & Send",
 ];
 const editor = ref(null);
+const initialHtmlBody = ref("<p></p>");
 const saving = ref(false);
 const sending = ref(false);
 const templates = ref([]);
@@ -656,6 +735,9 @@ const form = ref({
   max_bounces: 0,
   max_unsubscribes: 0,
   max_complaints: 0,
+  general_warmup_delay_value: 10,
+  general_warmup_delay_unit: "minutes",
+  max_followups: null, // NEW
 });
 
 const stopConditions = ref({
@@ -687,11 +769,11 @@ const personalizationTokens = [
   { value: "{{unsubscribeurl}}", label: "Unsubscribe" },
 ];
 
-const totalSequenceDays = computed(() =>
+const totalSequenceHours = computed(() =>
   followups.value.reduce((acc, fu) => {
     const v = Number(fu.delayvalue || 0);
-    if (fu.delayunit === "hours") return acc + v / 24;
-    if (fu.delayunit === "weeks") return acc + v * 7;
+    if (fu.delayunit === "seconds") return acc + v / 3600;
+    if (fu.delayunit === "minutes") return acc + v / 60;
     return acc + v;
   }, 0),
 );
@@ -712,7 +794,7 @@ const preflightChecks = computed(() => [
   {
     id: "delay",
     label: "Follow-up delays valid",
-    passed: followups.value.every((f) => Number(f.delayvalue) > 0),
+    passed: followups.value.every((f) => Number(f.delayvalue) >= 0),
   },
 ]);
 
@@ -726,6 +808,7 @@ onMounted(async () => {
 
   if (route.query.template && editor.value) {
     editor.value.innerHTML = route.query.template;
+    initialHtmlBody.value = editor.value.innerHTML;
   }
 
   if (route.params.id) {
@@ -733,8 +816,21 @@ onMounted(async () => {
   }
 });
 
-function goToStep(n) {
+async function goToStep(n) {
   currentWizardStep.value = n;
+  await nextTick();
+
+  if (n === 1 && editor.value) {
+    editor.value.innerHTML = initialHtmlBody.value || "<p></p>";
+  }
+
+  if (n === 2) {
+    followupEditorRefs.value.forEach((el, idx) => {
+      if (el && followups.value[idx]) {
+        el.innerHTML = followups.value[idx].htmlbody || "<p></p>";
+      }
+    });
+  }
 }
 
 function fmt(cmd) {
@@ -765,9 +861,9 @@ function insertToken(token) {
 }
 
 function loadTemplate(t) {
-  if (editor.value) {
-    editor.value.innerHTML = t.html_content || t.htmlcontent || "<p></p>";
-  }
+  const html = t.html_content || t.htmlcontent || "<p></p>";
+  initialHtmlBody.value = html;
+  if (editor.value) editor.value.innerHTML = html;
   toast.show("Template loaded", "success");
 }
 
@@ -788,10 +884,13 @@ function addFollowup() {
   followups.value.push({
     id,
     subject: "",
-    delayvalue: 3,
-    delayunit: "days",
+    delayvalue: 10,
+    delayunit: "minutes",
     stoponreply: stopConditions.value.onReply,
     htmlbody: "<p></p>",
+    is_reply_sequence: false,
+    wait_after_contact_reply_value: 10,
+    wait_after_contact_reply_unit: "minutes",
   });
   expandedFollowup.value = followups.value.length - 1;
 }
@@ -826,15 +925,26 @@ function fillFormFromCampaign(campaign) {
     max_bounces: campaign.max_bounces ?? 0,
     max_unsubscribes: campaign.max_unsubscribes ?? 0,
     max_complaints: campaign.max_complaints ?? 0,
+
+    general_warmup_delay_value: campaign.general_warmup_delay_value ?? 10,
+    general_warmup_delay_unit: campaign.general_warmup_delay_unit || "minutes",
+    max_followups: campaign.max_followups ?? null, // NEW
   };
+
+  const html = initialStep?.html_body || campaign.html_content || "<p></p>";
+  initialHtmlBody.value = html;
 
   followups.value = followupSteps.map((step, i) => ({
     id: step.id || Date.now() + i,
     subject: step.subject || "",
-    delayvalue: step.delay_value ?? 3,
-    delayunit: step.delay_unit || "days",
+    delayvalue: step.delay_value ?? 10,
+    delayunit: step.delay_unit || "minutes",
     stoponreply: !!step.stop_on_reply,
     htmlbody: step.html_body || "<p></p>",
+    is_reply_sequence: step.step_type === "reply_followup",
+    wait_after_contact_reply_value: step.wait_after_contact_reply_value ?? 10,
+    wait_after_contact_reply_unit:
+      step.wait_after_contact_reply_unit || "minutes",
   }));
 
   stopConditions.value = {
@@ -846,8 +956,7 @@ function fillFormFromCampaign(campaign) {
 
   nextTick(() => {
     if (editor.value) {
-      editor.value.innerHTML =
-        initialStep?.html_body || campaign.html_content || "<p></p>";
+      editor.value.innerHTML = initialHtmlBody.value || "<p></p>";
     }
     followupEditorRefs.value = [];
     nextTick(() => {
@@ -863,12 +972,13 @@ function fillFormFromCampaign(campaign) {
 async function loadCampaign(id) {
   try {
     const { data } = await api.get(`/campaigns/${id}`);
+    console.log("LOADED CAMPAIGN", data);
+    console.log("LOADED STEPS", data.steps);
     fillFormFromCampaign(data);
   } catch (e) {
     toast.show(e.response?.data?.detail || e.message, "error");
   }
 }
-
 function buildPayload() {
   const steps = [
     {
@@ -876,26 +986,35 @@ function buildPayload() {
       step_type: "initial",
       name: "Initial Email",
       subject: form.value.subject,
-      html_body: editor.value?.innerHTML || "<p></p>",
+      html_body: editor.value?.innerHTML || initialHtmlBody.value || "<p></p>",
       plain_body: null,
       delay_value: 0,
-      delay_unit: "days",
+      delay_unit: "minutes",
       delay_from: "most_recent",
       stop_on_reply: true,
       is_active: true,
     },
     ...followups.value.map((fu, idx) => ({
       step_number: idx + 2,
-      step_type: "followup",
-      name: `Follow-up ${idx + 1}`,
+      step_type: fu.is_reply_sequence ? "reply_followup" : "followup",
+      name: fu.is_reply_sequence
+        ? `Reply Sequence ${idx + 1}`
+        : `Follow-up ${idx + 1}`,
       subject: fu.subject || `Re: ${form.value.subject}`,
-      html_body: fu.htmlbody || "<p></p>",
+      html_body:
+        followupEditorRefs.value[idx]?.innerHTML || fu.htmlbody || "<p></p>",
       plain_body: null,
-      delay_value: Number(fu.delayvalue || 1),
-      delay_unit: fu.delayunit || "days",
-      delay_from: "previous_step",
+      delay_value: Number(fu.delayvalue || 0),
+      delay_unit: fu.delayunit || "minutes",
+      delay_from: fu.is_reply_sequence ? "their_reply" : "previous_step",
       stop_on_reply: !!fu.stoponreply,
       is_active: true,
+      wait_after_contact_reply_value: fu.is_reply_sequence
+        ? Number(fu.wait_after_contact_reply_value || 0)
+        : null,
+      wait_after_contact_reply_unit: fu.is_reply_sequence
+        ? fu.wait_after_contact_reply_unit || "minutes"
+        : null,
     })),
   ];
 
@@ -914,6 +1033,18 @@ function buildPayload() {
     max_bounces: Number(form.value.max_bounces || 0),
     max_complaints: Number(form.value.max_complaints || 0),
     max_unsubscribes: Number(form.value.max_unsubscribes || 0),
+    general_warmup_delay_value: Number(
+      form.value.general_warmup_delay_value || 0,
+    ),
+    general_warmup_delay_unit:
+      form.value.general_warmup_delay_unit || "minutes",
+
+    // NEW: send max_followups (null means unlimited)
+    max_followups:
+      form.value.max_followups === null || form.value.max_followups === ""
+        ? null
+        : Number(form.value.max_followups),
+
     steps,
   };
 }
@@ -922,6 +1053,9 @@ async function saveDraft() {
   saving.value = true;
   try {
     const payload = buildPayload();
+    console.log("FULL CAMPAIGN PAYLOAD", JSON.stringify(payload, null, 2));
+    console.log("PAYLOAD STEPS JSON", JSON.stringify(payload.steps, null, 2));
+    console.log("REPLY STEP JSON", JSON.stringify(payload.steps[1], null, 2));
     if (route.params.id) {
       await api.put(`/campaigns/${route.params.id}`, payload);
     } else {
@@ -949,9 +1083,8 @@ async function sendNow() {
     !confirm(
       `Launch "${form.value.name}" with ${followups.value.length + 1} emails?`,
     )
-  ) {
+  )
     return;
-  }
 
   sending.value = true;
   try {

@@ -13,9 +13,12 @@ from app.models.campaign import Campaign, CampaignRecipient, CampaignStatus
 from app.models.campaign_run import CampaignRun, RunStatus
 from app.models.campaign_step import CampaignStep, DelayFrom, DelayUnit, StepType
 from app.models.contact import Contact, contact_tags
-from app.services.email_service import _render_template, _resolve_send_fn
+from app.services.email_service import _render_template, _resolve_send_fn as _resolve_campaign_send_fn
+
 
 settings = get_settings()
+# must exist in your project
+
 
 
 def _utcnow() -> datetime:
@@ -152,7 +155,13 @@ def _anchor_event_for_step(step: CampaignStep, all_events: list[EmailEvent]) -> 
     return None
 
 
-def _step_due(step: CampaignStep, events: list[EmailEvent], now: datetime) -> bool:
+def _step_due(
+    campaign: Campaign,
+    step: CampaignStep,
+    events: list[EmailEvent],
+    now: datetime,
+) -> bool:
+    # Do not re-send same step
     if _last_step_sent_event(events, step.id):
         return False
 
@@ -160,11 +169,31 @@ def _step_due(step: CampaignStep, events: list[EmailEvent], now: datetime) -> bo
     if not anchor or not anchor.occurred_at:
         return False
 
-    due_at = anchor.occurred_at + _delay_delta(step.delay_value, step.delay_unit)
+    # 1) sequence-specific delay: current behavior
+    step_due_at = anchor.occurred_at + _delay_delta(step.delay_value, step.delay_unit)
+
+    # 2) general warmup based on last *sent* event in this campaign for this contact
+    last_sent_event = _last_event_by_type(events, "sent")
+    if last_sent_event and last_sent_event.occurred_at:
+        general_td = _delay_delta(
+            campaign.general_warmup_delay_value,
+            campaign.general_warmup_delay_unit,
+        )
+        warmup_due_at = last_sent_event.occurred_at + general_td
+    else:
+        # If we've never sent anything, you can treat general warmup as 0 or anchor-based.
+        warmup_due_at = anchor.occurred_at
+
+    # 3) Effective due time is the later of the two
+    due_at = max(step_due_at, warmup_due_at)
     return now >= due_at
 
 
-def _eligible_step_for_contact(campaign: Campaign, events: list[EmailEvent], now: datetime) -> Optional[CampaignStep]:
+def _eligible_step_for_contact(
+    campaign: Campaign,
+    events: list[EmailEvent],
+    now: datetime,
+) -> Optional[CampaignStep]:
     last_sent_step_number = _last_sent_step_number(events)
     if last_sent_step_number is None:
         return None
@@ -173,27 +202,28 @@ def _eligible_step_for_contact(campaign: Campaign, events: list[EmailEvent], now
         if step.step_number <= last_sent_step_number:
             continue
 
+        # stop-after-first-reply rule
         if step.stop_on_reply and _contact_replied(events):
             continue
 
-        if _step_due(step, events, now):
+        # Max normal followups BEFORE any reply
+        if step.step_type == StepType.followup and not _contact_replied(events):
+            if campaign.max_followups is not None:
+                if _normal_followups_count(events) >= campaign.max_followups:
+                    continue
+
+        # Max reply followups AFTER last reply
+        if step.step_type == StepType.reply_followup:
+            if campaign.max_followups is not None:
+                if _reply_followups_since_last_reply(events) >= campaign.max_followups:
+                    continue
+
+        if _step_due(campaign, step, events, now):
             return step
 
     return None
 
-
-async def _load_campaign_contacts(campaign: Campaign, user_id: int, db: AsyncSession) -> list[Contact]:
-    q = select(Contact).where(
-        Contact.user_id == user_id,
-        Contact.is_subscribed == True,
-    )
-
-    if campaign.segment_tags:
-        q = q.join(contact_tags).where(contact_tags.c.tag_id.in_(campaign.segment_tags))
-
-    return (await db.execute(q)).scalars().unique().all()
-
-
+    
 async def _load_contact_events(campaign_id: int, contact_id: int, db: AsyncSession) -> list[EmailEvent]:
     result = await db.execute(
         select(EmailEvent)
@@ -205,7 +235,98 @@ async def _load_contact_events(campaign_id: int, contact_id: int, db: AsyncSessi
     return result.scalars().all()
 
 
-async def _create_run(campaign_id: int, step_id: Optional[int], db: AsyncSession) -> CampaignRun:
+                
+async def evaluate_campaign_stop_conditions(db, campaign):
+    if campaign.max_bounces is not None and campaign.bounce_count >= campaign.max_bounces:
+        campaign.status = CampaignStatus.stopped
+        campaign.stopped_by_condition = True
+        campaign.stop_reason = "max_bounces_reached"
+        await db.commit()
+        return True
+
+    if campaign.max_complaints is not None and campaign.complaint_count >= campaign.max_complaints:
+        campaign.status = CampaignStatus.stopped
+        campaign.stopped_by_condition = True
+        campaign.stop_reason = "max_complaints_reached"
+        await db.commit()
+        return True
+
+    if campaign.max_unsubscribes is not None and campaign.unsubscribe_count >= campaign.max_unsubscribes:
+        campaign.status = CampaignStatus.stopped
+        campaign.stopped_by_condition = True
+        campaign.stop_reason = "max_unsubscribes_reached"
+        await db.commit()
+        return True
+
+    return False
+
+
+
+
+
+def should_send_normal_followup(
+    *,
+    contact_has_replied: bool,
+    step: CampaignStep,
+) -> bool:
+    """
+    Decide whether a non-reply followup step should be sent to this contact.
+    """
+    # If contact replied and this step is configured to stop on reply,
+    # do NOT send any more normal followups.
+    if contact_has_replied and step.stop_on_reply:
+        return False
+
+    return True
+
+
+async def get_contact_has_replied(
+    db: AsyncSession,
+    campaign_id: int,
+    contact_id: int,
+) -> bool:
+    """
+    Returns True if this contact has at least one reply event in this campaign.
+    """
+    result = await db.execute(
+        select(CampaignEvent.id).where(
+            CampaignEvent.campaign_id == campaign_id,
+            CampaignEvent.contact_id == contact_id,
+            CampaignEvent.event_type == "reply",  # adjust to your actual value
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _load_campaign_contacts(
+    campaign: Campaign,
+    user_id: int,
+    db: AsyncSession,
+) -> list[Contact]:
+    """
+    Load all subscribed contacts for this user, filtered by the campaign's segment tags.
+    """
+    q = select(Contact).where(
+        Contact.user_id == user_id,
+        Contact.is_subscribed == True,
+    )
+
+    if campaign.segment_tags:
+        q = q.join(contact_tags).where(
+            contact_tags.c.tag_id.in_(campaign.segment_tags)
+        )
+
+    result = await db.execute(q)
+    return result.scalars().unique().all()
+
+async def _create_run(
+    campaign_id: int,
+    step_id: Optional[int],
+    db: AsyncSession,
+) -> CampaignRun:
+    """
+    Create a CampaignRun row representing this followup processing run.
+    """
     run = CampaignRun(
         campaign_id=campaign_id,
         step_id=step_id,
@@ -214,9 +335,21 @@ async def _create_run(campaign_id: int, step_id: Optional[int], db: AsyncSession
         total_failed=0,
     )
     db.add(run)
-    await db.flush()
+    await db.flush()  # populate run.id
     return run
 
+
+async def _resolve_send_fn(campaign: Campaign, user_id: int, db: AsyncSession):
+    """
+    Resolve which low-level send function to use (SMTP vs PowerMTA, etc.).
+    Delegates to the shared helper from app.services.email_service.
+    """
+    # you already import _resolve_send_fn at the top:
+    # from app.services.email_service import _render_template, _resolve_send_fn
+    #
+    # so here we just return that helper directly, or wrap it if you need
+    # additional per-campaign/per-user logic later.
+    return await _resolve_campaign_send_fn(campaign, user_id, db)
 
 async def process_campaign_followups(
     campaign_id: int,
@@ -224,6 +357,7 @@ async def process_campaign_followups(
     db: AsyncSession,
     step_id: Optional[int] = None,
 ) -> dict:
+    # 1) Load campaign with steps and senders
     result = await db.execute(
         select(Campaign)
         .where(Campaign.id == campaign_id, Campaign.user_id == user_id)
@@ -237,13 +371,21 @@ async def process_campaign_followups(
     if not campaign:
         raise ValueError("Campaign not found")
 
-    if campaign.status not in (CampaignStatus.running, CampaignStatus.paused, CampaignStatus.scheduled):
-        raise ValueError(f"Cannot process followups for campaign in status: {campaign.status}")
+    if campaign.status not in (
+        CampaignStatus.running,
+        CampaignStatus.paused,
+        CampaignStatus.scheduled,
+    ):
+        raise ValueError(
+            f"Cannot process followups for campaign in status: {campaign.status}"
+        )
 
+    # 2) Load all subscribed contacts for this campaign
     contacts = await _load_campaign_contacts(campaign, user_id, db)
     if not contacts:
         raise ValueError("No subscribed contacts match the campaign segment.")
 
+    # 3) Create a run record for this execution
     run = await _create_run(campaign.id, step_id, db)
     await db.commit()
 
@@ -261,17 +403,109 @@ async def process_campaign_followups(
         "errors": [],
     }
 
-    async def process_one(contact: Contact):
-        nonlocal results, run
-        events = await _load_contact_events(campaign.id, contact.id, db)
-        step = _eligible_step_for_contact(campaign, events, now)
+    # Helper: classify one contact into a priority group + next step
+    def _classify_contact_state(
+        campaign: Campaign,
+        events: list[EmailEvent],
+        now: datetime,
+    ) -> tuple[str | None, Optional[CampaignStep]]:
+        """
+        Returns a tuple (action_type, step):
+          action_type in {"reply", "initial", "reply_followup", "followup"} or None
+        """
 
-        if step_id is not None and step and step.id != step_id:
+        # 1) Do we owe them a direct reply? (their_reply newer than our_reply)
+        last_their_reply = _last_event_by_type(events, "their_reply")
+        last_our_reply = _last_event_by_type(events, "our_reply")
+        if last_their_reply and (
+            not last_our_reply or last_their_reply.occurred_at > last_our_reply.occurred_at
+        ):
+            # You might have a dedicated "our_reply" step or template;
+            # here we just say we owe a "reply" action with no specific CampaignStep.
+            return "reply", None
+
+        # 2) Have we ever sent any email in this campaign to this contact?
+        last_sent_step_number = _last_sent_step_number(events)
+
+        if last_sent_step_number is None:
+            # No "sent" events → candidate for initial
+            initial_step = _initial_step(campaign)
+            if _step_due(campaign, initial_step, events, now):
+                return "initial", initial_step
+            return None, None
+
+        # 3) We have sent something; check reply_followup vs normal followup
+
+        # Find the next reply_followup step that could be due
+        next_reply_followup: Optional[CampaignStep] = None
+        for step in _active_non_initial_steps(campaign):
+            if getattr(step.step_type, "value", step.step_type) != StepType.reply_followup.value:
+                continue
+            if step.step_number <= last_sent_step_number:
+                continue
+            if not _step_due(campaign, step, events, now):
+                continue
+            # Max reply followups after last reply
+            if campaign.max_followups is not None:
+                if _reply_followups_since_last_reply(events) >= campaign.max_followups:
+                    continue
+            next_reply_followup = step
+            break
+
+        if next_reply_followup:
+            return "reply_followup", next_reply_followup
+
+        # 4) Otherwise, consider a normal followup
+        next_followup: Optional[CampaignStep] = None
+        for step in _active_non_initial_steps(campaign):
+            if getattr(step.step_type, "value", step.step_type) != StepType.followup.value:
+                continue
+            if step.step_number <= last_sent_step_number:
+                continue
+            if not _step_due(campaign, step, events, now):
+                continue
+            # stop-after-first-reply rule
+            if step.stop_on_reply and _contact_replied(events):
+                continue
+            # Max normal followups BEFORE any reply
+            if campaign.max_followups is not None and not _contact_replied(events):
+                if _normal_followups_count(events) >= campaign.max_followups:
+                    continue
+            next_followup = step
+            break
+
+        if next_followup:
+            return "followup", next_followup
+
+        return None, None
+
+    # Group contacts into priority buckets
+    group_reply: list[tuple[Contact, Optional[CampaignStep]]] = []
+    group_initial: list[tuple[Contact, CampaignStep]] = []
+    group_reply_followup: list[tuple[Contact, CampaignStep]] = []
+    group_followup: list[tuple[Contact, CampaignStep]] = []
+
+    for contact in contacts:
+        events = await _load_contact_events(campaign.id, contact.id, db)
+        action_type, step = _classify_contact_state(campaign, events, now)
+
+        # Optional step_id filter: only allow given step_id, otherwise ignore
+        if step_id is not None and step is not None and step.id != step_id:
+            action_type = None
             step = None
 
-        if not step:
-            results["skipped"] += 1
-            return
+        if action_type == "reply":
+            group_reply.append((contact, step))
+        elif action_type == "initial" and step is not None:
+            group_initial.append((contact, step))
+        elif action_type == "reply_followup" and step is not None:
+            group_reply_followup.append((contact, step))
+        elif action_type == "followup" and step is not None:
+            group_followup.append((contact, step))
+        # else: nothing due
+
+    async def _send_step(contact: Contact, step: CampaignStep):
+        nonlocal results, run
 
         html_body = _render_template(step.html_body, contact)
         plain_body = _render_template(step.plain_body, contact)
@@ -320,27 +554,62 @@ async def process_campaign_followups(
                         error=str(exc),
                     )
                 )
-                
-async def evaluate_campaign_stop_conditions(db, campaign):
-    if campaign.max_bounces is not None and campaign.bounce_count >= campaign.max_bounces:
-        campaign.status = CampaignStatus.stopped
-        campaign.stopped_by_condition = True
-        campaign.stop_reason = "max_bounces_reached"
-        await db.commit()
-        return True
+                run.total_failed = (run.total_failed or 0) + 1
+                results["failed"] += 1
+                results["errors"].append(str(exc))
 
-    if campaign.max_complaints is not None and campaign.complaint_count >= campaign.max_complaints:
-        campaign.status = CampaignStatus.stopped
-        campaign.stopped_by_condition = True
-        campaign.stop_reason = "max_complaints_reached"
-        await db.commit()
-        return True
+    # Helper to process a bucket with your concurrency limit
+    async def _process_bucket(bucket: list[tuple[Contact, CampaignStep | None]]):
+        for contact, step in bucket:
+            if step is None:
+                # For "reply" you might have separate handling later
+                results["skipped"] += 1
+                continue
+            await _send_step(contact, step)
+            results["processed_contacts"] += 1
 
-    if campaign.max_unsubscribes is not None and campaign.unsubscribe_count >= campaign.max_unsubscribes:
-        campaign.status = CampaignStatus.stopped
-        campaign.stopped_by_condition = True
-        campaign.stop_reason = "max_unsubscribes_reached"
-        await db.commit()
-        return True
+    # 5) Process groups in priority order
+    await _process_bucket(group_reply)           # highest priority: direct replies
+    await _process_bucket(group_initial)         # then initials
+    await _process_bucket(group_reply_followup)  # then reply sequences
+    await _process_bucket(group_followup)        # last: normal followups
 
-    return False
+    run.status = RunStatus.completed
+    await db.commit()
+    await db.refresh(run)
+
+    return results
+
+
+def _normal_followups_count(events: list[EmailEvent]) -> int:
+    # only until first inbound reply
+    first_reply = _first_inbound_reply_event(events)
+    cutoff = first_reply.occurred_at if first_reply else None
+
+    count = 0
+    for ev in events:
+        meta = _event_meta(ev)
+        if ev.event_type != "sent":
+            continue
+        if cutoff and ev.occurred_at >= cutoff:
+            continue
+        if meta.get("step_type") == "followup":  # your enum/string
+            count += 1
+    return count    
+
+
+def _reply_followups_since_last_reply(events: list[EmailEvent]) -> int:
+    last_reply = _last_inbound_reply_event(events)
+    if not last_reply:
+        return 0
+
+    count = 0
+    for ev in events:
+        meta = _event_meta(ev)
+        if ev.event_type != "sent":
+            continue
+        if ev.occurred_at <= last_reply.occurred_at:
+            continue
+        if meta.get("step_type") == "reply_followup":
+            count += 1
+    return count

@@ -220,14 +220,29 @@ async def send_campaign(campaign_id: int, user_id: int, db: AsyncSession) -> dic
                 results["failed"] += 1
                 results["errors"].append({"contact": contact.email, "error": str(exc)})
 
-    await asyncio.gather(*[send_one(contact) for contact in contacts])
-    campaign.sent_at = datetime.now(timezone.utc)
-    await db.commit()
+    try:
+        await asyncio.gather(*[send_one(contact) for contact in contacts])
 
-    return {
-        "campaign_id": campaign.id,
-        "step_sent": "initial",
-        "step_id": initial_step.id,
-        "total": len(contacts),
-        **results,
-    }
+        campaign.sent_at = datetime.now(timezone.utc)
+
+        if results["sent"] == len(contacts):
+            campaign.status = CampaignStatus.completed
+        elif results["failed"] == len(contacts):
+            campaign.status = CampaignStatus.paused
+        else:
+            campaign.status = CampaignStatus.completed
+
+        await db.commit()
+
+        return {
+            "campaign_id": campaign.id,
+            "step_sent": "initial",
+            "step_id": initial_step.id,
+            "total": len(contacts),
+            **results,
+        }
+
+    except Exception:
+        campaign.status = CampaignStatus.paused
+        await db.commit()
+        raise
