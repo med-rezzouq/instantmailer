@@ -374,7 +374,7 @@ async def process_campaign_followups(
     if campaign.status not in (
         CampaignStatus.running,
         CampaignStatus.paused,
-        CampaignStatus.scheduled,
+        CampaignStatus.scheduled
     ):
         raise ValueError(
             f"Cannot process followups for campaign in status: {campaign.status}"
@@ -557,6 +557,20 @@ async def process_campaign_followups(
                 run.total_failed = (run.total_failed or 0) + 1
                 results["failed"] += 1
                 results["errors"].append(str(exc))
+                
+    # NEW: pick at most one (contact, step) from highest-priority group
+    def _pick_next() -> tuple[Optional[Contact], Optional[CampaignStep | None]]:
+        # Priority: initials first, then reply, then reply_followup, then followup
+        if group_initial:
+            return group_initial[0]
+        if group_reply:
+            return group_reply[0]
+        if group_reply_followup:
+            return group_reply_followup[0]
+        if group_followup:
+            return group_followup[0]
+        return None, None
+
 
     # Helper to process a bucket with your concurrency limit
     async def _process_bucket(bucket: list[tuple[Contact, CampaignStep | None]]):
@@ -568,11 +582,33 @@ async def process_campaign_followups(
             await _send_step(contact, step)
             results["processed_contacts"] += 1
 
-    # 5) Process groups in priority order
-    await _process_bucket(group_reply)           # highest priority: direct replies
-    await _process_bucket(group_initial)         # then initials
-    await _process_bucket(group_reply_followup)  # then reply sequences
-    await _process_bucket(group_followup)        # last: normal followups
+
+    # 5) Process at most ONE contact per call, with priority
+
+    contact, step = _pick_next()
+
+    if contact is not None and step is not None:
+        await _send_step(contact, step)
+        results["processed_contacts"] += 1
+    elif contact is not None and step is None:
+        # For "reply" without a specific step, either skip or handle separately
+        results["skipped"] += 1
+    else:
+        # Nothing due for any contact this run
+        pass
+
+# 5) Process groups in priority order
+
+# As long as there is any initial work due, do ONLY initials this run.
+# if group_initial:
+#     await _process_bucket(group_initial)
+# else:
+#     await _process_bucket(group_reply)           # then direct replies
+#     await _process_bucket(group_reply_followup)  # then reply sequences
+#     await _process_bucket(group_followup)        # last: normal followups
+
+
+
 
     run.status = RunStatus.completed
     await db.commit()

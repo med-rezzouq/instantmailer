@@ -205,7 +205,7 @@ async def update_campaign(
     campaign = result.scalar_one_or_none()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    if campaign.status == CampaignStatus.completed:
+    if campaign.status == CampaignStatus.completed or campaign.status == CampaignStatus.running:
         raise HTTPException(status_code=400, detail="Cannot edit a completed campaign")
 
     data = payload.model_dump(exclude_unset=True, exclude={"steps"})
@@ -262,6 +262,11 @@ async def delete_campaign(
         raise HTTPException(status_code=404, detail="Campaign not found")
     await db.delete(campaign)
     await db.commit()
+
+
+
+
+
 
 
 @router.post("/{campaign_id}/send")

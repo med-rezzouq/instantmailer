@@ -26,7 +26,7 @@ async def get_or_create_user(session):
     user = User(
         email="med.rezzouq@gmail.com",
         name="Dev User",
-        hashed_password="$2b$12$1B.oZ4t0UucFi0L8lV0j.ustv8dB5D/SXRf9Hh4/Qqfdo5q9kisQK",
+        hashed_password="$2b$12$7Gdd98iuua/LGPEs0I7wfuGIrSxQ59vBawgYqAwW0E8y7znM3mSne",
         is_active=True,
     )
     session.add(user)
