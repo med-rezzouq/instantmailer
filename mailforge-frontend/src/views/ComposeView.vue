@@ -628,6 +628,7 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
           <div class="card mb-4">
             <div class="font-bold text-sm mb-4">Launch Campaign</div>
             <div class="space-y-3 mb-4">
+              <!-- Send now -->
               <label
                 class="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
               >
@@ -644,6 +645,8 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                   </div>
                 </div>
               </label>
+
+              <!-- Draft -->
               <label
                 class="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
               >
@@ -661,6 +664,8 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                 </div>
               </label>
             </div>
+
+            <!-- Draft button -->
             <button
               v-if="sendMode === 'draft'"
               class="btn btn-ghost w-full mb-2"
@@ -675,6 +680,18 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                     : "Save Draft"
               }}
             </button>
+
+            <!-- Ready button -->
+            <button
+              v-if="sendMode === 'ready'"
+              class="btn btn-primary w-full mb-2"
+              @click="markReady"
+              :disabled="saving"
+            >
+              {{ saving ? "Saving..." : "Mark as Ready" }}
+            </button>
+
+            <!-- Send now button -->
             <button
               v-if="sendMode === 'now'"
               class="btn btn-primary w-full"
@@ -1017,6 +1034,12 @@ function buildPayload() {
         : null,
     })),
   ];
+  let status = null;
+  if (sendMode.value === "draft") {
+    status = "draft";
+  } else if (sendMode.value === "scheduled") {
+    status = "scheduled";
+  }
 
   return {
     name: form.value.name,
@@ -1044,7 +1067,7 @@ function buildPayload() {
       form.value.max_followups === null || form.value.max_followups === ""
         ? null
         : Number(form.value.max_followups),
-
+    status,
     steps,
   };
 }

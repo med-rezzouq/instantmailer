@@ -18,6 +18,7 @@ from app.database import Base
 class CampaignStatus(str, enum.Enum):
     draft = "draft"
     scheduled = "scheduled"
+    ready = "ready"
     running = "running"
     completed = "completed"
     paused = "paused"
@@ -64,7 +65,7 @@ class Campaign(Base):
     max_complaints = Column(Integer, nullable=False, default=0)
     max_unsubscribes = Column(Integer, nullable=False, default=0)
     max_followups = Column(Integer, nullable=True)  # null = unlimited
-    
+
     stopped_by_condition = Column(Boolean, default=False, nullable=False)
     stop_reason = Column(String, nullable=True)
 

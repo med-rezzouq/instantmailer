@@ -1,5 +1,19 @@
 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzc4MTEyNDE2LCJ0eXBlIjoiYWNjZXNzIn0.PineeQgXQQx3Yn4s_BzskPVDBrsTYgZzWmue5ElHgKc
 
+docker compose exec api python seed_mock_data.py --only all
+
+
+to execute command the service name = db andnot mailforge-db, example:
+
+docker compose exec db psql -U mailforge -d mailforge -c "SELECT id, email FROM users ORDER BY id;"
+
+----
+update password 
+docker compose exec db psql -U mailforge -d mailforge -c "UPDATE users SET hashed_password = '$2b$12$7Gdd98iuua/LGPEs0I7wfuGIrSxQ59vBawgYqAwW0E8y7znM3mSne' WHERE email = 'med.rezzouq@gmail.com';"
+
+
+docker compose logs --tail=50 api
+
 
 -------------SUMMARIZE--------------
 
