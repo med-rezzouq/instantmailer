@@ -149,22 +149,51 @@ def _last_sent_step_number(events: list[EmailEvent]) -> Optional[int]:
 
 def _anchor_event_for_step(step: CampaignStep, all_events: list[EmailEvent]) -> Optional[EmailEvent]:
     delay_from = _delay_from_value(step)
+    step_type = _step_type_value(step)
 
-    if delay_from == DelayFrom.previous_step.value:
-        previous_step_number = step.step_number - 1
-        previous_sent: list[EmailEvent] = []
-        for event in all_events:
-            if _normalize_event_type(event.event_type) != "sent":
+    print(
+        "ANCHOR_DEBUG: step.id",
+        step.id,
+        "step.step_number",
+        step.step_number,
+        "raw type",
+        step.step_type,
+        "normalized type",
+        step_type,
+        "delay_from",
+        delay_from,
+    )
+
+    # SPECIAL CASE: post_reply_followup anchored on last reply sent
+    if step_type == StepType.post_reply_followup.value:
+        print("ANCHOR_DEBUG >>> post_reply_followup branch ENTER")
+        reply_sents: list[EmailEvent] = []
+        for ev in all_events:
+            if _normalize_event_type(ev.event_type) != "sent":
                 continue
-            meta = _event_meta(event)
-            if meta.get("step_number") == previous_step_number:
-                previous_sent.append(event)
-        if not previous_sent:
+            meta = _event_meta(ev)
+            # support both old and new stored values
+            if meta.get("step_type") in (StepType.reply.value, "reply_followup"):
+                reply_sents.append(ev)
+
+        print("ANCHOR_DEBUG: reply_sents found", len(reply_sents))
+
+        if not reply_sents:
             return None
-        return max(
-            previous_sent,
+
+        anchor = max(
+            reply_sents,
             key=lambda e: e.occurred_at or datetime.min.replace(tzinfo=timezone.utc),
         )
+        print(
+            "ANCHOR_DEBUG: chosen anchor at",
+            anchor.occurred_at,
+        )
+        return anchor
+
+    if delay_from == DelayFrom.previous_step.value:
+        # unchanged previous step logic
+        ...
 
     if delay_from == DelayFrom.their_reply.value:
         return _last_event_by_type(all_events, "their_reply")
@@ -193,7 +222,6 @@ async def _last_global_sent_event(db: AsyncSession, campaign: Campaign) -> Optio
 
 
     
-
 def _step_due(
     campaign: Campaign,
     step: CampaignStep,
@@ -205,13 +233,27 @@ def _step_due(
     """
     A step is due if:
       - it has not already been sent for this contact, and
-      - its own step delay (per-contact) has elapsed from its anchor event, and
+      - (for normal steps) its per-contact delay has elapsed from its anchor event, and
       - the general warmup delay (global) has elapsed since the last 'sent' to anyone.
+
+    For reply-anchored steps, we IGNORE per-contact delay for eligibility and only enforce warmup,
+    so replies can preempt other work as soon as warmup allows.
     """
 
-    # 1) Do not re-send the same step to this contact
-    if _last_step_sent_event(events, step.id):
-        return False
+    print(
+        "STEP_DUE_ENTER",
+        "campaign", campaign.id,
+        "step", step.step_number, _step_type_value(step),
+    )
+
+    step_type = _step_type_value(step)
+
+    # 1) Do not re-send the same step to this contact,
+    #    EXCEPT for reply_followup steps which we allow to fire again on new replies.
+# 1) Do not re-send the same step to this contact.
+    if step_type != StepType.post_reply_followup.value:
+        if _last_step_sent_event(events, step.id):
+            return False
 
     # 2) Find the anchor event used for this step's own delay
     anchor = _anchor_event_for_step(step, events)
@@ -223,10 +265,19 @@ def _step_due(
     if not anchor or not anchor.occurred_at:
         return False
 
-    # 3) Per-step delay (per-contact), from anchor
-    step_due_at = anchor.occurred_at + _delay_delta(step.delay_value, step.delay_unit)
+    delay_from = _delay_from_value(step)
 
-    # 4) General warmup: from the last global "sent" event (any contact in this campaign/sender)
+    # 3) Per-contact delay from anchor
+    if delay_from == DelayFrom.their_reply.value:
+        # Replies: ignore per-contact delay for eligibility; only warmup matters
+        per_contact_td = timedelta(0)
+    else:
+        # Normal steps (initial, followups, etc.): use delay_value/unit only
+        per_contact_td = _delay_delta(step.delay_value, step.delay_unit)
+
+    step_due_at = anchor.occurred_at + per_contact_td
+
+    # 4) General warmup: from the last global "sent" event (any contact in this campaign)
     if last_global_sent_at is not None:
         general_td = _delay_delta(
             campaign.general_warmup_delay_value,
@@ -237,16 +288,18 @@ def _step_due(
         # No global sends yet; warmup does not hold us back
         warmup_due_at = anchor.occurred_at
 
-    # 5) Final due time is the max of the per-contact step delay and global warmup
+    # 5) Final due time is the max of per-contact and warmup
     due_at = max(step_due_at, warmup_due_at)
     result = now >= due_at
 
     print(
         "STEP_DUE_DEBUG",
         "campaign", campaign.id,
-        "step", step.step_number, _step_type_value(step),
+        "step", step.step_number, step_type,
         "events", len(events),
         "now", now.isoformat(),
+        "anchor", anchor.occurred_at.isoformat(),
+        "per_contact_td", per_contact_td,
         "step_due_at", step_due_at.isoformat(),
         "last_global_sent_at", last_global_sent_at,
         "warmup_td", campaign.general_warmup_delay_value, campaign.general_warmup_delay_unit,
@@ -446,6 +499,14 @@ async def process_campaign_followups(
         last_their_reply = _last_event_by_type(events, "their_reply")
         last_our_reply = _last_event_by_type(events, "our_reply")
 
+        print(
+            "CLASSIFY_DEBUG",
+            "campaign", campaign.id,
+            "events", len(events),
+            "last_their_reply", last_their_reply.occurred_at if last_their_reply else None,
+            "last_our_reply", last_our_reply.occurred_at if last_our_reply else None,
+        )
+
         contact_has_fresh_reply = (
             last_their_reply
             and (
@@ -456,39 +517,97 @@ async def process_campaign_followups(
 
         # 2) If they have just replied, prioritize reply-followup steps
         if contact_has_fresh_reply:
-            last_sent_step_number = _last_sent_step_number(events) or 0
-            reply_fups = _reply_followups_since_last_reply(events)
+            # How many emails have we sent after their LAST reply?
+            total_after_reply = _emails_after_last_inbound_reply(events, step_type_filter=None)
+            reply_after_reply = _emails_after_last_inbound_reply(events, step_type_filter=StepType.reply.value)
+            post_fups_after_reply = _emails_after_last_inbound_reply(events, step_type_filter=StepType.post_reply_followup.value)
 
-            next_reply_step: Optional[CampaignStep] = None
-            for step in _active_non_initial_steps(campaign):
-                if getattr(step.step_type, "value", step.step_type) != StepType.reply_followup.value:
-                    continue
-                if step.step_number <= last_sent_step_number:
-                    continue
-                if not _step_due(campaign, step, events, now,last_global_sent_at=last_global_sent_at):
-                    continue
-                if campaign.max_followups is not None:
-                    if _reply_followups_since_last_reply(events) >= campaign.max_followups:
+            print(
+                "REPLY_INTERNAL",
+                "total_after_reply", total_after_reply,
+                "reply_after_reply", reply_after_reply,
+                "post_fups_after_reply", post_fups_after_reply,
+            )
+
+            # 2A: Reply sequence (our direct replies after they reply)
+            if reply_after_reply < 1:
+                next_reply_step: Optional[CampaignStep] = None
+                for step in _active_non_initial_steps(campaign):
+                    if _step_type_value(step) != StepType.reply.value:
                         continue
-                next_reply_step = step
-                break
 
-            if next_reply_step:
-                # First auto-reply after their reply
-                if reply_fups == 0:
+                    if not _step_due(
+                        campaign,
+                        step,
+                        events,
+                        now,
+                        last_global_sent_at=last_global_sent_at,
+                    ):
+                        continue
+
+                    next_reply_step = step
+                    break
+
+                if next_reply_step:
+                    # First priority: send reply emails (normal reply sequence)
                     return "normal_reply", next_reply_step
-                # Subsequent reply-followup emails in the reply sequence
-                return "reply_followup", next_reply_step
 
-            # No reply-sequence step due right now
+            # 2B: No more reply steps due; consider post-reply followups
+            # Here we assume:
+            # - We have already replied at least once (reply_after_reply > 0)
+            # - They have NOT replied again since then (no extra logic yet; you can plug in helpers later)
+            if reply_after_reply > 0:
+                next_post_reply_step: Optional[CampaignStep] = None
+                for step in _active_non_initial_steps(campaign):
+                    if _step_type_value(step) != StepType.post_reply_followup.value:
+                        continue
+
+                    if not _step_due(
+                        campaign,
+                        step,
+                        events,
+                        now,
+                        last_global_sent_at=last_global_sent_at,
+                    ):
+                        continue
+
+                    # Global cap on post-reply followups per inbound reply
+                    max_post_fups = campaign.max_followups  # reuse your field
+                    print(
+                        "REPLY_CAP_DEBUG campaign",
+                        campaign.id,
+                        "max_followups raw",
+                        campaign.max_followups,
+                        "post_fups_after_reply",
+                        post_fups_after_reply,
+                    )
+                    if max_post_fups is not None and post_fups_after_reply >= max_post_fups:
+                        print("REPLY_CAP_DEBUG >> hit cap, skipping post_reply_followup for this contact")
+                        continue
+
+                    next_post_reply_step = step
+                    break
+
+                if next_post_reply_step:
+                    return "post_reply_followup", next_post_reply_step
+
+            # Nothing due for this fresh reply
             return None, None
+
+
 
         # 3) No fresh reply: have we ever sent anything?
         last_sent_step_number = _last_sent_step_number(events)
 
         if last_sent_step_number is None:
             initial_step = _initial_step(campaign)
-            if _step_due(campaign, initial_step, events, now, last_global_sent_at=last_global_sent_at):
+            if _step_due(
+                campaign,
+                initial_step,
+                events,
+                now,
+                last_global_sent_at=last_global_sent_at,
+            ):
                 print(
                     "INIT DUE?",
                     "campaign",
@@ -515,9 +634,16 @@ async def process_campaign_followups(
         for step in _active_non_initial_steps(campaign):
             if getattr(step.step_type, "value", step.step_type) != StepType.followup.value:
                 continue
+            # For normal followups, keep the one-way sequence progression
             if step.step_number <= last_sent_step_number:
                 continue
-            if not _step_due(campaign, step, events, now):
+            if not _step_due(
+                campaign,
+                step,
+                events,
+                now,
+                last_global_sent_at=last_global_sent_at,
+            ):
                 continue
             # stop-after-first-reply rule
             if step.stop_on_reply and _contact_replied(events):
@@ -535,11 +661,14 @@ async def process_campaign_followups(
 
         return None, None
 
+
+
     # Group contacts into priority buckets
     group_initial: list[tuple[Contact, CampaignStep]] = []
     group_initial_followup: list[tuple[Contact, CampaignStep]] = []
     group_normal_reply: list[tuple[Contact, CampaignStep]] = []
     group_reply_followup: list[tuple[Contact, CampaignStep]] = []
+    group_post_reply_followup: list[tuple[Contact, CampaignStep]] = []  # NEW
 
     for contact in contacts:
         events = await _load_contact_events(campaign.id, contact.id, db)
@@ -549,6 +678,13 @@ async def process_campaign_followups(
             now,
             last_global_sent_at,
         )
+
+        print(
+            "REPLY_CLASSIFY",
+            "contact", contact.id,
+            "action_type", action_type,
+            "step_id", step.id if step else None,
+        )    
 
         # Optional step_id filter
         if step_id is not None and step is not None and step.id != step_id:
@@ -563,6 +699,8 @@ async def process_campaign_followups(
             group_normal_reply.append((contact, step))
         elif action_type == "reply_followup" and step is not None:
             group_reply_followup.append((contact, step))
+        elif action_type == "post_reply_followup" and step is not None:
+            group_post_reply_followup.append((contact, step))
         # else: nothing due
 
     async def _send_step(contact: Contact, step: CampaignStep):
@@ -631,13 +769,16 @@ async def process_campaign_followups(
 
     # pick at most one (contact, step) from highest-priority group
     def _pick_next() -> tuple[Optional[Contact], Optional[CampaignStep]]:
-        # Priority: initial email, then first auto reply, then reply-followups, then initial followups
+        # Priority: initial email, then first auto reply,
+        # then reply-followups, then post-reply followups, then initial followups
         if group_initial:
             return group_initial[0]
         if group_normal_reply:
             return group_normal_reply[0]
         if group_reply_followup:
             return group_reply_followup[0]
+        if group_post_reply_followup:
+            return group_post_reply_followup[0]
         if group_initial_followup:
             return group_initial_followup[0]
         return None, None
@@ -669,8 +810,7 @@ def _first_inbound_reply_event(events: list[EmailEvent]) -> Optional[EmailEvent]
     )
 
 
-def _last_inbound_reply_event(events: list[EmailEvent]) -> Optional[EmailEvent]:
-    return _last_event_by_type(events, "their_reply")
+
 
 
 def _normal_followups_count(events: list[EmailEvent]) -> int:
@@ -690,18 +830,73 @@ def _normal_followups_count(events: list[EmailEvent]) -> int:
     return count
 
 
-def _reply_followups_since_last_reply(events: list[EmailEvent]) -> int:
-    last_reply = _last_inbound_reply_event(events)
-    if not last_reply:
+
+def _last_inbound_reply_event(events: list[EmailEvent]) -> Optional[EmailEvent]:
+    return _last_event_by_type(events, "their_reply")
+    
+
+
+
+
+
+
+
+def _last_outbound_reply_event(events: list[EmailEvent]) -> Optional[EmailEvent]:
+    # our manual reply back to the contact
+    return _last_event_by_type(events, "our_reply")
+
+
+
+
+def _emails_after_last_inbound_reply(events: list[EmailEvent], *, step_type_filter: str | None = None) -> int:
+    """
+    Count how many 'sent' events happened AFTER the last inbound reply.
+    Optionally filter by step_type.
+    """
+    last_their_reply = _last_inbound_reply_event(events)
+    if not last_their_reply or not last_their_reply.occurred_at:
         return 0
 
     count = 0
     for ev in events:
+        if _normalize_event_type(ev.event_type) != "sent":
+            continue
+        if not ev.occurred_at or ev.occurred_at <= last_their_reply.occurred_at:
+            continue
         meta = _event_meta(ev)
-        if ev.event_type != "sent":
-            continue
-        if ev.occurred_at <= last_reply.occurred_at:
-            continue
-        if meta.get("step_type") == "reply_followup":
-            count += 1
+        if step_type_filter is not None:
+            if meta.get("step_type") != step_type_filter:
+                continue
+        count += 1
     return count
+
+
+
+def _we_have_replied_to_their_last_reply(events: list[EmailEvent]) -> bool:
+    """
+    True if there is an 'our_reply' event after the last 'their_reply' event.
+    """
+    last_their = _last_inbound_reply_event(events)
+    last_our = _last_outbound_reply_event(events)
+
+    if not last_their or not last_their.occurred_at:
+        return False
+    if not last_our or not last_our.occurred_at:
+        return False
+
+    return last_our.occurred_at > last_their.occurred_at
+
+
+def _contact_replied_after_our_last_reply(events: list[EmailEvent]) -> bool:
+    """
+    True if there is a 'their_reply' after our last 'our_reply'.
+    """
+    last_their = _last_inbound_reply_event(events)
+    last_our = _last_outbound_reply_event(events)
+
+    if not last_our or not last_our.occurred_at:
+        return False
+    if not last_their or not last_their.occurred_at:
+        return False
+
+    return last_their.occurred_at > last_our.occurred_at

@@ -960,7 +960,7 @@ function fillFormFromCampaign(campaign) {
     delayunit: step.delay_unit || "minutes",
     stoponreply: !!step.stop_on_reply,
     htmlbody: step.html_body || "<p></p>",
-    is_reply_sequence: step.step_type === "reply_followup",
+    is_reply_sequence: step.step_type === "reply",
     wait_after_contact_reply_value: step.wait_after_contact_reply_value ?? 10,
     wait_after_contact_reply_unit:
       step.wait_after_contact_reply_unit || "minutes",
@@ -1012,28 +1012,62 @@ function buildPayload() {
       stop_on_reply: true,
       is_active: true,
     },
-    ...followups.value.map((fu, idx) => ({
-      step_number: idx + 2,
-      step_type: fu.is_reply_sequence ? "reply_followup" : "followup",
-      name: fu.is_reply_sequence
-        ? `Reply Sequence ${idx + 1}`
-        : `Follow-up ${idx + 1}`,
-      subject: fu.subject || `Re: ${form.value.subject}`,
-      html_body:
-        followupEditorRefs.value[idx]?.innerHTML || fu.htmlbody || "<p></p>",
-      plain_body: null,
-      delay_value: Number(fu.delayvalue || 0),
-      delay_unit: fu.delayunit || "minutes",
-      delay_from: fu.is_reply_sequence ? "their_reply" : "previous_step",
-      stop_on_reply: !!fu.stoponreply,
-      is_active: true,
-      wait_after_contact_reply_value: fu.is_reply_sequence
-        ? Number(fu.wait_after_contact_reply_value || 0)
-        : null,
-      wait_after_contact_reply_unit: fu.is_reply_sequence
-        ? fu.wait_after_contact_reply_unit || "minutes"
-        : null,
-    })),
+    ...followups.value.map((fu, idx) => {
+      const isReply = fu.is_reply_sequence;
+      const stopOnReply = !!fu.stoponreply;
+
+      // Map UI flags to step_type
+      let step_type;
+      if (isReply) {
+        // Cases 1–2: reply sequence, regardless of stopOnReply
+        step_type = "reply";
+      } else if (!isReply && stopOnReply) {
+        // Case 3: normal followup that should stop if they reply
+        step_type = "followup";
+      } else {
+        // Case 4: neither reply sequence nor stop-on-reply → post-reply followup
+        step_type = "post_reply_followup";
+      }
+
+      // Map delay_from to match your semantics
+      let delay_from;
+      if (step_type === "reply") {
+        // Reply steps are anchored on their reply
+        delay_from = "their_reply";
+      } else if (step_type === "post_reply_followup") {
+        // Followup after we replied and they were silent
+        delay_from = "our_reply";
+      } else {
+        // Normal followups chained after previous step
+        delay_from = "previous_step";
+      }
+
+      return {
+        step_number: idx + 2,
+        step_type,
+        name:
+          step_type === "reply"
+            ? `Reply Sequence ${idx + 1}`
+            : step_type === "post_reply_followup"
+              ? `Post-reply Follow-up ${idx + 1}`
+              : `Follow-up ${idx + 1}`,
+        subject: fu.subject || `Re: ${form.value.subject}`,
+        html_body:
+          followupEditorRefs.value[idx]?.innerHTML || fu.htmlbody || "<p></p>",
+        plain_body: null,
+        delay_value: Number(fu.delayvalue || 0),
+        delay_unit: fu.delayunit || "minutes",
+        delay_from,
+        stop_on_reply: stopOnReply,
+        is_active: true,
+        wait_after_contact_reply_value: isReply
+          ? Number(fu.wait_after_contact_reply_value || 0)
+          : null,
+        wait_after_contact_reply_unit: isReply
+          ? fu.wait_after_contact_reply_unit || "minutes"
+          : null,
+      };
+    }),
   ];
   let status = null;
   if (sendMode.value === "draft") {
