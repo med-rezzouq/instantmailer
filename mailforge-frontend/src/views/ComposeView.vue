@@ -282,31 +282,22 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
         <div>
           <div class="card mb-4">
             <div class="font-bold mb-3 text-sm">Sending Provider</div>
-            <div
-              class="flex items-center gap-3 p-3 rounded-lg border border-primary/30 bg-primary/5 dark:bg-primary-dark/10 dark:border-primary-dark/30"
-            >
-              <div
-                class="w-8 h-8 rounded-lg bg-primary/10 dark:bg-primary-dark/20 flex items-center justify-center"
-              >
-                <svg
-                  class="w-4 h-4 text-primary dark:text-primary-dark"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
+
+            <div class="mb-3">
+              <label class="form-label">SMTP Provider</label>
+              <select v-model.number="form.provider_id" class="form-input">
+                <option :value="null">Select a provider...</option>
+                <option
+                  v-for="p in availableProviders"
+                  :key="p.id"
+                  :value="p.id"
                 >
-                  <path d="M3 8l7.89 5.26a2 2 0 0 0 2.22 0L21 8" />
-                  <path
-                    d="M5 19h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <div class="text-sm font-semibold">PowerMTA</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">
-                  High-volume delivery engine
-                </div>
-              </div>
+                  {{ p.name || p.label || p.host }}
+                </option>
+              </select>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Emails will be sent from the From email configured on this SMTP.
+              </p>
             </div>
           </div>
 
@@ -340,6 +331,8 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
         </div>
       </div>
     </div>
+
+    <!-- Steps 1, 2, 3 remain same structurally (only using updated form) -->
 
     <div v-if="currentWizardStep === 1">
       <div class="card mb-4">
@@ -417,6 +410,7 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
 
     <div v-if="currentWizardStep === 2">
       <div v-for="(fu, idx) in followups" :key="fu.id" class="card mb-4">
+        <!-- followup config unchanged -->
         <div class="flex items-center justify-between mb-4">
           <div class="font-semibold">
             {{
@@ -741,20 +735,22 @@ const followupEditorRefs = ref([]);
 const isEditMode = computed(() => !!route.params.id);
 const autosaving = computed(() => saving.value);
 
+const availableProviders = ref([]); // from /smtp
+
 const form = ref({
   name: "",
   subject: "",
   preview_text: "",
   from_name: "",
   reply_to: "",
-  provider: "powermta",
+  provider_id: null, // chosen SMTP
   segment_tags: [],
   max_bounces: 0,
   max_unsubscribes: 0,
   max_complaints: 0,
   general_warmup_delay_value: 10,
   general_warmup_delay_unit: "minutes",
-  max_followups: null, // NEW
+  max_followups: null,
 });
 
 const stopConditions = ref({
@@ -820,6 +816,13 @@ onMounted(async () => {
     const templatesRes = await api.get("/templates?limit=20");
     templates.value = templatesRes.data || [];
   } catch {}
+
+  try {
+    const providersRes = await api.get("/smtp");
+    availableProviders.value = providersRes.data || [];
+  } catch (e) {
+    console.error("Failed to load SMTP providers", e);
+  }
 
   await nextTick();
 
@@ -937,15 +940,14 @@ function fillFormFromCampaign(campaign) {
     preview_text: campaign.preview_text || "",
     from_name: campaign.from_name || "",
     reply_to: campaign.reply_to || "",
-    provider: campaign.provider || "powermta",
+    provider_id: campaign.provider_id ?? null,
     segment_tags: campaign.segment_tags || [],
     max_bounces: campaign.max_bounces ?? 0,
     max_unsubscribes: campaign.max_unsubscribes ?? 0,
     max_complaints: campaign.max_complaints ?? 0,
-
     general_warmup_delay_value: campaign.general_warmup_delay_value ?? 10,
     general_warmup_delay_unit: campaign.general_warmup_delay_unit || "minutes",
-    max_followups: campaign.max_followups ?? null, // NEW
+    max_followups: campaign.max_followups ?? null,
   };
 
   const html = initialStep?.html_body || campaign.html_content || "<p></p>";
@@ -989,13 +991,12 @@ function fillFormFromCampaign(campaign) {
 async function loadCampaign(id) {
   try {
     const { data } = await api.get(`/campaigns/${id}`);
-    console.log("LOADED CAMPAIGN", data);
-    console.log("LOADED STEPS", data.steps);
     fillFormFromCampaign(data);
   } catch (e) {
     toast.show(e.response?.data?.detail || e.message, "error");
   }
 }
+
 function buildPayload() {
   const steps = [
     {
@@ -1047,6 +1048,7 @@ function buildPayload() {
     preview_text: form.value.preview_text,
     from_name: form.value.from_name,
     reply_to: form.value.reply_to,
+    provider_id: form.value.provider_id,
     segment_tags: form.value.segment_tags,
     track_opens: true,
     track_clicks: true,
@@ -1061,8 +1063,6 @@ function buildPayload() {
     ),
     general_warmup_delay_unit:
       form.value.general_warmup_delay_unit || "minutes",
-
-    // NEW: send max_followups (null means unlimited)
     max_followups:
       form.value.max_followups === null || form.value.max_followups === ""
         ? null
@@ -1076,9 +1076,6 @@ async function saveDraft() {
   saving.value = true;
   try {
     const payload = buildPayload();
-    console.log("FULL CAMPAIGN PAYLOAD", JSON.stringify(payload, null, 2));
-    console.log("PAYLOAD STEPS JSON", JSON.stringify(payload.steps, null, 2));
-    console.log("REPLY STEP JSON", JSON.stringify(payload.steps[1], null, 2));
     if (route.params.id) {
       await api.put(`/campaigns/${route.params.id}`, payload);
     } else {
@@ -1126,3 +1123,4 @@ async function sendNow() {
   }
 }
 </script>
+'''

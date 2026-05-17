@@ -1,4 +1,4 @@
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzc4MTEyNDE2LCJ0eXBlIjoiYWNjZXNzIn0.PineeQgXQQx3Yn4s_BzskPVDBrsTYgZzWmue5ElHgKc
+med.rezzouq / 4463985@Med99
 
 docker compose exec api python seed_mock_data.py --only all
 
@@ -11,7 +11,7 @@ docker compose exec db psql -U mailforge -d mailforge -c "SELECT id, email FROM 
 update password 
 docker compose exec db psql -U mailforge -d mailforge -c "UPDATE users SET hashed_password = '$2b$12$7Gdd98iuua/LGPEs0I7wfuGIrSxQ59vBawgYqAwW0E8y7znM3mSne' WHERE email = 'med.rezzouq@gmail.com';"
 
-
+docker compose exec db psql -U mailforge -d mailforge  (to use the sql bash and be able to run sql sueries)
 docker compose logs --tail=50 api
 
 

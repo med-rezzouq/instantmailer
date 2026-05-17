@@ -142,7 +142,7 @@ async def create_campaign(session, user, contacts, smtp_config):
         name="Demo Campaign",
         status=CampaignStatus.draft,
         segment_tags=[],
-        from_name= "admin",
+        from_name="admin",
         reply_to="admin@academicsights.com",
         track_opens=True,
         track_clicks=True,
@@ -150,10 +150,14 @@ async def create_campaign(session, user, contacts, smtp_config):
         total_contacts=len(contacts),
         new_contacts_since_send=0,
         scheduled_at=datetime.now(timezone.utc) + timedelta(hours=1),
+
+        # NEW: link campaign to this SMTP as provider
+        provider_id=smtp_config.id,
     )
     session.add(campaign)
     await session.flush()
 
+    # Keep the sender row if your existing send logic still expects it
     sender = CampaignSender(
         campaign_id=campaign.id,
         sender_type=SenderType.smtp,

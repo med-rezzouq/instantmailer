@@ -78,7 +78,18 @@ class CampaignStepOut(CampaignStepBase):
 
     model_config = {"from_attributes": True}
 
+class InboundReplyIn(BaseModel):
+    from_email: str
+    to_email: str
+    subject: Optional[str] = None
+    text_body: Optional[str] = None
+    html_body: Optional[str] = None
+    occurred_at: Optional[datetime] = None
 
+    # NEW: simulated data from headers / message-id lookup
+    step_id: Optional[int] = None
+    step_number: Optional[int] = None
+    
 class CampaignCreate(BaseModel):
     name: str
     preview_text: Optional[str] = None
@@ -91,11 +102,13 @@ class CampaignCreate(BaseModel):
     parent_campaign_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
 
+    # NEW: selected SMTP provider for this campaign
+    provider_id: Optional[int] = None
+
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
     max_followups: Optional[int] = None
-    # NEW: campaign-level warm-up delay
     general_warmup_delay_value: int = 10
     general_warmup_delay_unit: DelayUnit = DelayUnit.minutes
 
@@ -142,11 +155,13 @@ class CampaignUpdate(BaseModel):
     parent_campaign_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
 
+    # NEW: allow changing provider for an existing campaign
+    provider_id: Optional[int] = None
+
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
     max_followups: Optional[int] = None
-    # NEW
     general_warmup_delay_value: Optional[int] = None
     general_warmup_delay_unit: Optional[DelayUnit] = None
     steps: Optional[List[CampaignStepCreate]] = None
@@ -191,6 +206,9 @@ class CampaignOut(BaseModel):
     from_name: Optional[str] = None
     reply_to: Optional[str] = None
 
+    # NEW: expose chosen SMTP provider to frontend
+    provider_id: Optional[int] = None
+
     segment_tags: List[str] = Field(default_factory=list)
     track_opens: bool
     track_clicks: bool
@@ -222,3 +240,5 @@ class CampaignOut(BaseModel):
     steps: List[CampaignStepOut] = Field(default_factory=list)
     
     model_config = {"from_attributes": True}
+
+
