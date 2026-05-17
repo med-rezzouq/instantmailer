@@ -11,10 +11,25 @@ docker compose exec db psql -U mailforge -d mailforge -c "SELECT id, email FROM 
 update password 
 docker compose exec db psql -U mailforge -d mailforge -c "UPDATE users SET hashed_password = '$2b$12$7Gdd98iuua/LGPEs0I7wfuGIrSxQ59vBawgYqAwW0E8y7znM3mSne' WHERE email = 'med.rezzouq@gmail.com';"
 
+
+****************************************************
 docker compose exec db psql -U mailforge -d mailforge  (to use the sql bash and be able to run sql sueries)
-docker compose logs --tail=50 api
+docker compose logs --tail=200 api
 
+To exit sql batch (/q)
 
+{
+  "from_email": "medrezzouq9@gmail.com",
+  "to_email": "admin@academicsights.com",
+  "subject": "Re: Hello med how can i help you today",
+  "text_body": "Hi, yes I'm interested. Let's continue.",
+  "html_body": "<p>Hi, yes I'm interested. Let's continue.</p>",
+  "occurred_at": null,
+  "step_id": 20,
+  "step_number": 1
+}
+
+****************************************************
 -------------SUMMARIZE--------------
 
 so the entry point is the root main.py there we create a fastapi function and add the necessary routes that we import from all routers/files
