@@ -12,8 +12,11 @@ update password
 docker compose exec db psql -U mailforge -d mailforge -c "UPDATE users SET hashed_password = '$2b$12$7Gdd98iuua/LGPEs0I7wfuGIrSxQ59vBawgYqAwW0E8y7znM3mSne' WHERE email = 'med.rezzouq@gmail.com';"
 
 
-****************************************************
+****************************************************************
 docker compose exec db psql -U mailforge -d mailforge  (to use the sql bash and be able to run sql sueries)
+
+SELECT event_type, occurred_at, metadata FROM email_events WHERE campaign_id = 2 AND contact_id = 1 ORDER BY occurred_at;
+
 docker compose logs --tail=200 api
 
 To exit sql batch (/q)
@@ -28,6 +31,7 @@ To exit sql batch (/q)
   "step_id": 20,
   "step_number": 1
 }
+
 
 ****************************************************
 -------------SUMMARIZE--------------
