@@ -18,7 +18,8 @@ from app.database import Base
 class StepType(str, enum.Enum):
     initial = "initial"
     followup = "followup"
-    reply_followup = "reply_followup"
+    reply = "reply"
+    post_reply_followup = "post_reply_followup"# followups if they go silent 
 
 
 class DelayUnit(str, enum.Enum):

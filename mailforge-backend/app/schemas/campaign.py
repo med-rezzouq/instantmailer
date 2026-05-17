@@ -35,10 +35,10 @@ class CampaignStepBase(BaseModel):
             if self.delay_value < 1:
                 raise ValueError("Non-initial steps must have delay_value >= 1")
 
-        if self.step_type == StepType.reply_followup:
+        if self.step_type in (StepType.reply, StepType.post_reply_followup):
             if self.delay_from == DelayFrom.previous_step:
                 raise ValueError(
-                    "reply_followup steps cannot use delay_from='previous_step'; "
+                    "Reply-related steps cannot use delay_from='previous_step'; "
                     "use their_reply, our_reply, or most_recent"
                 )
             # optional: enforce that reply steps have contact-reply delay set
