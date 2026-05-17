@@ -200,11 +200,19 @@
               </button>
 
               <button
-                v-if="canSend(c)"
+                v-if="canStart(c)"
                 class="btn btn-primary btn-sm"
-                @click="$emit('send', c.id)"
+                @click="$emit('start', c.id)"
               >
-                Send
+                Start
+              </button>
+
+              <button
+                v-if="canPause(c)"
+                class="btn btn-ghost btn-sm"
+                @click="$emit('pause', c.id)"
+              >
+                Pause
               </button>
 
               <button
@@ -345,12 +353,21 @@
           Stats
         </button>
         <button
-          v-if="canSend(c)"
+          v-if="canStart(c)"
           class="btn btn-primary btn-sm flex-1"
-          @click="$emit('send', c.id)"
+          @click="$emit('start', c.id)"
         >
-          Send
+          Start
         </button>
+
+        <button
+          v-if="canPause(c)"
+          class="btn btn-ghost btn-sm"
+          @click="$emit('pause', c.id)"
+        >
+          Pause
+        </button>
+
         <button
           class="btn btn-ghost btn-sm text-red-500"
           @click="$emit('delete', c.id)"
@@ -374,7 +391,7 @@ defineProps({
   },
 });
 
-defineEmits(["send", "delete", "stats"]);
+defineEmits(["start", "pause", "delete", "stats"]);
 
 function getFollowupCount(c) {
   if (Array.isArray(c.followups)) return c.followups.length;
@@ -442,9 +459,14 @@ function getOpenLabel(c) {
   return "Low";
 }
 
-function canSend(c) {
+function canStart(c) {
   const status = (c.status || "").toLowerCase();
   return ["draft", "scheduled", "paused"].includes(status);
+}
+
+function canPause(c) {
+  const status = (c.status || "").toLowerCase();
+  return status === "running";
 }
 
 function normalizeText(v) {

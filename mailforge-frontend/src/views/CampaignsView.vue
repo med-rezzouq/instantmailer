@@ -121,7 +121,8 @@
     <CampaignsTable
       :campaigns="filteredCampaigns"
       :loading="loading"
-      @send="sendCampaign"
+      @start="startCampaign"
+      @pause="pauseCampaign"
       @delete="deleteCampaign"
       @stats="viewStats"
     />
@@ -217,12 +218,24 @@ function getOpenCount(c) {
   return 0;
 }
 
-async function sendCampaign(id) {
-  if (!confirm("Send this campaign?")) return;
+async function startCampaign(id) {
+  if (!confirm("Start this campaign? It will begin sending via the scheduler."))
+    return;
   try {
-    await api.post(`/campaigns/${id}/send`);
-    toast.show("Campaign sending!", "success");
+    await api.post(`/campaigns/${id}/start`);
+    toast.show("Campaign started!", "success");
     load();
+  } catch (e) {
+    toast.show(e.response?.data?.detail || e.message, "error");
+  }
+}
+
+async function pauseCampaign(id) {
+  if (!confirm("Pause this campaign? The scheduler will stop sending.")) return;
+  try {
+    await api.post(`/campaigns/${id}/pause`);
+    toast.show("Campaign paused!", "success");
+    load(); // refresh list so status shows as paused
   } catch (e) {
     toast.show(e.response?.data?.detail || e.message, "error");
   }

@@ -41,20 +41,52 @@ async def _ensure_fresh_token(token: OAuthToken, db: AsyncSession) -> str:
 
 
 async def _resolve_send_fn(campaign: Campaign, user_id: int, db: AsyncSession):
-    if not campaign.senders:
-        raise ValueError("No sender configured for this campaign.")
+    """
+    Resolve a send function for this campaign.
 
-    sender = campaign.senders[0]
-    sender_type = getattr(sender.sender_type, "value", sender.sender_type)
+    New flow:
+      - Use campaign.provider_id to pick an SMTPConfig for this user.
+    Legacy fallback:
+      - Use campaign.senders[0] if present.
+    """
+    smtp_cfg: SMTPConfig | None = None
+    sender_type: str | None = None
 
-    if sender_type == "smtp":
+    # 1) New: if provider_id is set, use that SMTP
+    if campaign.provider_id is not None:
         res = await db.execute(
             select(SMTPConfig).where(
                 SMTPConfig.user_id == user_id,
+                SMTPConfig.id == campaign.provider_id,
                 SMTPConfig.is_active == True,
             )
         )
         smtp_cfg = res.scalars().first()
+        if smtp_cfg:
+            sender_type = "smtp"
+
+    # 2) Legacy fallback: campaign_senders table
+    if smtp_cfg is None:
+        if not campaign.senders:
+            raise ValueError("No sender configured for this campaign.")
+
+        sender: CampaignSender = campaign.senders[0]
+        sender_type = getattr(sender.sender_type, "value", sender.sender_type)
+
+        if sender_type == "smtp":
+            res = await db.execute(
+                select(SMTPConfig).where(
+                    SMTPConfig.user_id == user_id,
+                    SMTPConfig.id == sender.sender_id,
+                    SMTPConfig.is_active == True,
+                )
+            )
+            smtp_cfg = res.scalars().first()
+            if not smtp_cfg:
+                raise ValueError("No active SMTP configuration found. Add one in Connections.")
+
+    # SMTP branch (either from provider_id or legacy sender)
+    if sender_type == "smtp":
         if not smtp_cfg:
             raise ValueError("No active SMTP configuration found. Add one in Connections.")
 
@@ -69,6 +101,7 @@ async def _resolve_send_fn(campaign: Campaign, user_id: int, db: AsyncSession):
 
         return send_fn
 
+    # OAuth-based senders (legacy)
     if sender_type == "microsoft":
         provider_enum = OAuthProvider.MICROSOFT
         send_impl = microsoft_service.send_email

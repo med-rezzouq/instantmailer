@@ -61,6 +61,14 @@ class Campaign(Base):
     preview_text = Column(String, nullable=True)
     from_name = Column(String, nullable=True)
     reply_to = Column(String, nullable=True)
+
+    provider_id = Column(
+        Integer,
+        nullable=True,
+    )
+    # no ForeignKey() so Alembic does not need smtp_servers table
+
+
     max_bounces = Column(Integer, nullable=False, default=0)
     max_complaints = Column(Integer, nullable=False, default=0)
     max_unsubscribes = Column(Integer, nullable=False, default=0)
