@@ -487,6 +487,11 @@ async def process_campaign_followups(
 
         # 2) If they have just replied, prioritize reply-followup steps
         if contact_has_fresh_reply:
+            if _auto_reply_sent_for_last_inbound_reply(events):
+                # already replied automatically to this last inbound reply
+                # skip this contact for "normal_reply" so others (like contact 5) can be served
+                return None, None
+ 
             last_sent_step_number = _last_sent_step_number(events) or 0
             reply_fups = _reply_followups_since_last_reply(events)
 
@@ -752,9 +757,43 @@ def _normal_followups_count(events: list[EmailEvent]) -> int:
             count += 1
     return count
 
+
+
+def _last_inbound_reply_event(events: list[EmailEvent]) -> Optional[EmailEvent]:
+    return _last_event_by_type(events, "their_reply")
+    
+
+
+def _auto_reply_sent_for_last_inbound_reply(events: list[EmailEvent]) -> bool:
+    last_their_reply = _last_inbound_reply_event(events)
+    if not last_their_reply or not last_their_reply.occurred_at:
+        return False
+
+    last_auto = None
+    for ev in events:
+        if _normalize_event_type(ev.event_type) != "sent":
+            continue
+        meta = _event_meta(ev)
+        if meta.get("step_type") != "reply_followup":
+            continue
+        if not ev.occurred_at or ev.occurred_at <= last_their_reply.occurred_at:
+            continue
+        # this is a reply_followup sent after the last inbound reply
+        if last_auto is None or ev.occurred_at > last_auto.occurred_at:
+            last_auto = ev
+
+    # if we found at least one, we already auto‑replied to that reply
+    return last_auto is not None
+
+
+
+
+
 def _last_outbound_reply_event(events: list[EmailEvent]) -> Optional[EmailEvent]:
     # our manual reply back to the contact
     return _last_event_by_type(events, "our_reply")
+
+
 
 
 def _reply_followups_since_last_reply(events: list[EmailEvent]) -> int:
