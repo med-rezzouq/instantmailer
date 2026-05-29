@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models.user import User
-from app.models.contact import Contact, ContactTag
+from app.models.contact import Contact, ContactTag, ContactGroup
 from app.models.template import EmailTemplate
 from app.models.smtp_config import SMTPConfig
 from app.models.campaign import Campaign, CampaignStatus, CampaignRecipient, EmailProvider
@@ -34,6 +34,29 @@ async def get_or_create_user(session):
     return user
 
 
+async def get_or_create_default_group(session, user_id: int) -> ContactGroup:
+    """
+    Ensure each user has a 'Default' contact group and return it.
+    """
+    result = await session.execute(
+        select(ContactGroup).where(
+            ContactGroup.user_id == user_id,
+            ContactGroup.name == "Default",
+        )
+    )
+    group = result.scalar_one_or_none()
+    if group:
+        return group
+
+    group = ContactGroup(
+        user_id=user_id,
+        name="Default",
+    )
+    session.add(group)
+    await session.flush()
+    return group
+
+
 async def get_or_create_tags(session, user_id):
     tags_data = ["Lead", "Customer", "Trial", "VIP"]
     tags = []
@@ -52,7 +75,7 @@ async def get_or_create_tags(session, user_id):
     return tags
 
 
-async def get_or_create_contacts(session, user_id):
+async def get_or_create_contacts(session, user_id, default_group: ContactGroup):
     contacts_data = [
         ("medrezzouq9@gmail.com", "Medrezzouq9", ""),
         ("kora4yo@gmail.com", "Kora4yo", ""),
@@ -75,9 +98,14 @@ async def get_or_create_contacts(session, user_id):
                 is_subscribed=True,
                 open_count=0,
                 click_count=0,
+                group_id=default_group.id,  # NEW: assign to default group
             )
             session.add(contact)
             await session.flush()
+        else:
+            # Ensure existing seeded contacts also belong to the default group
+            if getattr(contact, "group_id", None) is None:
+                contact.group_id = default_group.id
         contacts.append(contact)
 
     return contacts
@@ -102,12 +130,11 @@ async def get_or_create_template(session, user_id: int):
             <p>Hi {{ firstname }},</p>
             <p>Welcome to MailForge! This is a demo template.</p>
         """,
-        thumbnail=None,  # or a URL string if you have one
+        thumbnail=None,
     )
     session.add(template)
     await session.flush()
     return template
-
 
 
 async def get_or_create_smtp_config(session, user_id):
@@ -150,14 +177,11 @@ async def create_campaign(session, user, contacts, smtp_config):
         total_contacts=len(contacts),
         new_contacts_since_send=0,
         scheduled_at=datetime.now(timezone.utc) + timedelta(hours=1),
-
-        # NEW: link campaign to this SMTP as provider
         provider_id=smtp_config.id,
     )
     session.add(campaign)
     await session.flush()
 
-    # Keep the sender row if your existing send logic still expects it
     sender = CampaignSender(
         campaign_id=campaign.id,
         sender_type=SenderType.smtp,
@@ -203,12 +227,15 @@ async def main(seed_part: str = "all"):
     async with AsyncSessionLocal() as session:
         user = await get_or_create_user(session)
 
+        # Ensure default group exists for this user
+        default_group = await get_or_create_default_group(session, user.id)
+
         if seed_part in ("all", "tags"):
             await get_or_create_tags(session, user.id)
 
         contacts = []
         if seed_part in ("all", "contacts"):
-            contacts = await get_or_create_contacts(session, user.id)
+            contacts = await get_or_create_contacts(session, user.id, default_group)
 
         if seed_part in ("all", "template"):
             await get_or_create_template(session, user.id)
@@ -219,7 +246,7 @@ async def main(seed_part: str = "all"):
 
         if seed_part == "campaign":
             if not contacts:
-                contacts = await get_or_create_contacts(session, user.id)
+                contacts = await get_or_create_contacts(session, user.id, default_group)
             if not smtp_config:
                 smtp_config = await get_or_create_smtp_config(session, user.id)
             campaign = await create_campaign(session, user, contacts, smtp_config)

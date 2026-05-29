@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     APP_NAME: str = "MailForge"
@@ -41,8 +42,11 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_timeout: int = 15
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

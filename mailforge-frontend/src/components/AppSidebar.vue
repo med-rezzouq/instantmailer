@@ -178,6 +178,7 @@ const mainNav = [
   { to: "/dashboard", label: "Dashboard", icon: IconGrid },
   { to: "/compose", label: "Compose", icon: IconEdit },
   { to: "/campaigns", label: "Campaigns", icon: IconSend },
+  { to: "/campaignTracking", label: "Campaign Tracking", icon: IconBarChart },
 ];
 const audienceNav = [
   { to: "/contacts", label: "Contacts", icon: IconUsers },
@@ -186,7 +187,10 @@ const audienceNav = [
 const insightNav = [
   { to: "/analytics", label: "Analytics", icon: IconBarChart },
 ];
-const settingsNav = [{ to: "/smtp", label: "SMTP Servers", icon: IconServer }];
+const settingsNav = [
+  { to: "/smtp", label: "SMTP Servers", icon: IconServer },
+  { to: "/tracking", label: "Tracking Domains", icon: IconServer },
+];
 
 const providers = ref([
   {

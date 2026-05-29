@@ -36,11 +36,15 @@ const routes = [
         component: () => import("@/views/ComposeView.vue"),
         props: true,
       },
+
+      // Single route for both groups and contacts
       {
-        path: "contacts",
+        path: "contacts/:groupId?",
         name: "contacts",
         component: () => import("@/views/ContactsView.vue"),
+        props: true,
       },
+
       {
         path: "templates",
         name: "templates",
@@ -55,6 +59,18 @@ const routes = [
         path: "smtp",
         name: "smtp",
         component: () => import("@/views/SmtpView.vue"),
+      },
+      // NEW: tracking domains
+      {
+        path: "tracking",
+        name: "tracking",
+        component: () => import("@/views/TrackingView.vue"),
+      },
+      {
+        path: "campaignTracking/:campaign_id?",
+        name: "campaignTracking",
+        component: () => import("@/views/CampaignTrackingView.vue"),
+        props: true,
       },
     ],
   },
