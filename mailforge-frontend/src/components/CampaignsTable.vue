@@ -193,7 +193,7 @@
             <div class="flex items-center justify-end gap-2">
               <button
                 class="btn btn-ghost btn-sm"
-                @click="$emit('stats', c)"
+                @click="$emit('stats', c.id)"
                 title="View stats"
               >
                 Stats

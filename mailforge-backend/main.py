@@ -6,7 +6,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import get_settings
 from app.database import engine, Base
 from app.middleware.rate_limit import limiter
-from app.routers import auth, oauth, contacts, campaigns, templates, analytics, webhooks, smtp, campaign_v2, tracking, powermta, ai
+from app.routers import auth, oauth, contacts, campaigns, templates, analytics, webhooks, smtp, campaign_v2, tracking, powermta, ai, tracking
 
 settings = get_settings()
 
@@ -42,10 +42,11 @@ app.include_router(templates.router)
 app.include_router(analytics.router)
 app.include_router(webhooks.router)
 app.include_router(smtp.router)
-app.include_router(campaign_v2.router)
 app.include_router(tracking.router)
+app.include_router(campaign_v2.router)
 app.include_router(powermta.router)
 app.include_router(ai.router)
+
 
 @app.get("/health")
 async def health():

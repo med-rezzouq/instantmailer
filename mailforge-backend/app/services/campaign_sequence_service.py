@@ -192,8 +192,36 @@ def _anchor_event_for_step(step: CampaignStep, all_events: list[EmailEvent]) -> 
         return anchor
 
     if delay_from == DelayFrom.previous_step.value:
-        # unchanged previous step logic
-        ...
+        # Anchor on the last sent event of the previous step_number
+        prev_step_number = (step.step_number or 0) - 1
+        if prev_step_number <= 0:
+            return None
+
+        prev_sent_events: list[EmailEvent] = []
+        for ev in all_events:
+            if _normalize_event_type(ev.event_type) != "sent":
+                continue
+            meta = _event_meta(ev)
+            if meta.get("step_number") == prev_step_number:
+                prev_sent_events.append(ev)
+
+        print(
+            "ANCHOR_DEBUG: previous_step branch, prev_step_number",
+            prev_step_number,
+            "found",
+            len(prev_sent_events),
+            "events",
+        )
+
+        if not prev_sent_events:
+            return None
+
+        anchor = max(
+            prev_sent_events,
+            key=lambda e: e.occurred_at or datetime.min.replace(tzinfo=timezone.utc),
+        )
+        print("ANCHOR_DEBUG: previous_step anchor at", anchor.occurred_at)
+        return anchor
 
     if delay_from == DelayFrom.their_reply.value:
         return _last_event_by_type(all_events, "their_reply")
@@ -251,7 +279,7 @@ def _step_due(
     # 1) Do not re-send the same step to this contact,
     #    EXCEPT for reply_followup steps which we allow to fire again on new replies.
 # 1) Do not re-send the same step to this contact.
-    if step_type != StepType.post_reply_followup.value:
+    if step_type not in (StepType.post_reply_followup.value, StepType.followup.value):
         if _last_step_sent_event(events, step.id):
             return False
 
@@ -635,8 +663,8 @@ async def process_campaign_followups(
             if getattr(step.step_type, "value", step.step_type) != StepType.followup.value:
                 continue
             # For normal followups, keep the one-way sequence progression
-            if step.step_number <= last_sent_step_number:
-                continue
+            # if step.step_number <= last_sent_step_number:
+            #     continue
             if not _step_due(
                 campaign,
                 step,
