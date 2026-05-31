@@ -72,6 +72,23 @@ const routes = [
         component: () => import("@/views/CampaignTrackingView.vue"),
         props: true,
       },
+      // in router/index.js children
+      {
+        path: "mailboxes",
+        name: "mailboxes",
+        component: () => import("@/views/MailboxesView.vue"),
+      },
+      // in router/index.js children
+      {
+        path: "imapmailboxes",
+        name: "imapmailboxes",
+        component: () => import("@/views/ImapMailBoxesView.vue"),
+      },
+      {
+        path: "warmup",
+        name: "warmup",
+        component: () => import("@/views/WarmupView.vue"),
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/dashboard" },

@@ -12,17 +12,65 @@ from app.models.smtp_config import SMTPConfig
 from app.models.campaign import Campaign, CampaignStatus, CampaignRecipient, EmailProvider
 from app.models.campaign_step import CampaignStep, StepType, DelayFrom, DelayUnit
 from app.models.campaign_sender import CampaignSender, SenderType
+from app.models.mailbox import Mailbox
+
+
+async def get_or_create_mock_mailboxes(session, user_id: int):
+    """
+    Create a few mock connected mailboxes for testing the /mailboxes UI.
+    These use fake tokens and are not meant for real API calls.
+    """
+    seed_mailboxes = [
+        ("google", "warmup1@gmail.com", "Warmup Gmail 1"),
+        ("google", "warmup2@gmail.com", "Warmup Gmail 2"),
+        ("microsoft", "warmup1@yourtenant.onmicrosoft.com", "Warmup O365 1"),
+        ("microsoft", "warmup2@yourtenant.onmicrosoft.com", "Warmup O365 2"),
+    ]
+
+    created = []
+
+    for provider, email, display_name in seed_mailboxes:
+        result = await session.execute(
+            select(Mailbox).where(
+                Mailbox.user_id == user_id,
+                Mailbox.provider == provider,
+                Mailbox.email == email,
+            )
+        )
+        mailbox = result.scalar_one_or_none()
+        if mailbox:
+            created.append(mailbox)
+            continue
+
+        # make expiry naive to match TIMESTAMP WITHOUT TIME ZONE
+        expiry_aware = datetime.now(timezone.utc) + timedelta(hours=1)
+        expiry_naive = expiry_aware.replace(tzinfo=None)
+
+        mailbox = Mailbox(
+            user_id=user_id,
+            provider=provider,
+            email=email,
+            display_name=display_name,
+            access_token="FAKE_ACCESS_TOKEN_FOR_SEEDING",
+            refresh_token="FAKE_REFRESH_TOKEN_FOR_SEEDING",
+            token_expiry=expiry_naive,
+            scope="gmail.modify userinfo.email" if provider == "google" else "Mail.ReadWrite",
+            warmup_enabled=True,
+            last_sync_at=None,
+        )
+        session.add(mailbox)
+        await session.flush()
+        created.append(mailbox)
+
+    return created
 
 
 async def get_or_create_user(session):
-    # Try to fetch the first existing user
     result = await session.execute(select(User).order_by(User.id))
     user = result.scalars().first()
-
     if user:
         return user
 
-    # No users yet: create a default dev user
     user = User(
         email="med.rezzouq@gmail.com",
         name="Dev User",
@@ -35,9 +83,6 @@ async def get_or_create_user(session):
 
 
 async def get_or_create_default_group(session, user_id: int) -> ContactGroup:
-    """
-    Ensure each user has a 'Default' contact group and return it.
-    """
     result = await session.execute(
         select(ContactGroup).where(
             ContactGroup.user_id == user_id,
@@ -98,12 +143,11 @@ async def get_or_create_contacts(session, user_id, default_group: ContactGroup):
                 is_subscribed=True,
                 open_count=0,
                 click_count=0,
-                group_id=default_group.id,  # NEW: assign to default group
+                group_id=default_group.id,
             )
             session.add(contact)
             await session.flush()
         else:
-            # Ensure existing seeded contacts also belong to the default group
             if getattr(contact, "group_id", None) is None:
                 contact.group_id = default_group.id
         contacts.append(contact)
@@ -244,6 +288,10 @@ async def main(seed_part: str = "all"):
         if seed_part in ("all", "smtp", "campaign"):
             smtp_config = await get_or_create_smtp_config(session, user.id)
 
+        # seed mailbox connections
+        if seed_part in ("all", "mailboxes"):
+            await get_or_create_mock_mailboxes(session, user.id)
+
         if seed_part == "campaign":
             if not contacts:
                 contacts = await get_or_create_contacts(session, user.id, default_group)
@@ -260,7 +308,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--only",
-        choices=["all", "tags", "contacts", "template", "smtp", "campaign"],
+        choices=["all", "mailboxes", "tags", "contacts", "template", "smtp", "campaign"],
         default="all",
     )
     args = parser.parse_args()
