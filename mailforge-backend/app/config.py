@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str | None = None
 
+
     REDIS_URL: str = "redis://redis:6379/0"
     MAX_EMAILS_PER_BATCH: int = 500
     SEND_CONCURRENCY_LIMIT: int = 50
