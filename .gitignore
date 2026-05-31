@@ -11,6 +11,7 @@ dist/
 build/
 *.egg-info/
 
+notes.txt
 # Node
 node_modules/
 vite.svg
