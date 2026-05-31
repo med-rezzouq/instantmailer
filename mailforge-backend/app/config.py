@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     MICROSOFT_TENANT_ID: str = ""
     MICROSOFT_REDIRECT_URI: str = "http://localhost:8000/oauth/microsoft/callback"
 
-    GOOGLE_CLIENT_ID: str = ""
-    GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/oauth/google/callback"
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
 
     REDIS_URL: str = "redis://redis:6379/0"
     MAX_EMAILS_PER_BATCH: int = 500
