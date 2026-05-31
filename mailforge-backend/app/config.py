@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     MICROSOFT_TENANT_ID: str = ""
     MICROSOFT_REDIRECT_URI: str = "http://localhost:8000/oauth/microsoft/callback"
 
+
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str | None = None
