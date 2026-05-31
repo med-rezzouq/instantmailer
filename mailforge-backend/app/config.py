@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     APP_NAME: str = "MailForge"
@@ -16,9 +17,11 @@ class Settings(BaseSettings):
     MICROSOFT_TENANT_ID: str = ""
     MICROSOFT_REDIRECT_URI: str = "http://localhost:8000/oauth/microsoft/callback"
 
-    GOOGLE_CLIENT_ID: str = ""
-    GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/oauth/google/callback"
+
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str | None = None
+
 
     REDIS_URL: str = "redis://redis:6379/0"
     MAX_EMAILS_PER_BATCH: int = 500
@@ -41,8 +44,11 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_timeout: int = 15
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

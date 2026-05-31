@@ -134,7 +134,7 @@ import { ref, computed, onMounted } from "vue";
 import CampaignsTable from "@/components/CampaignsTable.vue";
 import api from "@/api";
 import { useToastStore } from "@/stores/toast";
-
+import { useRouter } from "vue-router";
 const toast = useToastStore();
 
 const campaigns = ref([]);
@@ -142,6 +142,8 @@ const loading = ref(false);
 const search = ref("");
 const statusFilter = ref("");
 const providerFilter = ref("");
+
+const router = useRouter();
 
 onMounted(load);
 
@@ -252,7 +254,7 @@ async function deleteCampaign(id) {
   }
 }
 
-function viewStats(c) {
-  alert(`Stats for "${c.name}" — coming soon`);
+function viewStats(campId) {
+  router.push(`/campaignTracking/${campId}`);
 }
 </script>

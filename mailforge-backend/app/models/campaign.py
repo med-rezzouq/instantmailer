@@ -46,6 +46,11 @@ class Campaign(Base):
     __tablename__ = "campaigns"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    opens = Column(Integer, nullable=False, server_default="0")
+    clicks = Column(Integer, nullable=False, server_default="0")
+
+
     user_id = Column(
         Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
