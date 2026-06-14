@@ -42,26 +42,29 @@
             <th class="th">Actions Enabled</th>
             <th class="th">Delay</th>
             <th class="th">Status</th>
+            <th class="th">Run logs</th>
             <th class="th">Actions</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="loading">
             <td
-              colspan="8"
+              colspan="9"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               Loading...
             </td>
           </tr>
+
           <tr v-else-if="!tasks.length">
             <td
-              colspan="8"
+              colspan="9"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               No warmup tasks yet. Add your first one above.
             </td>
           </tr>
+
           <tr
             v-else
             v-for="t in tasks"
@@ -71,9 +74,11 @@
             <td class="td text-gray-500 dark:text-gray-400">
               {{ t.id }}
             </td>
+
             <td class="td">
               <div class="font-semibold">{{ t.name }}</div>
             </td>
+
             <td class="td">
               <div class="text-sm">
                 <span
@@ -89,6 +94,7 @@
                 </div>
               </div>
             </td>
+
             <td class="td">
               <div class="text-xs text-gray-500">
                 <span v-if="t.allowed_sender">
@@ -97,6 +103,7 @@
                 <span v-else class="text-gray-400"> Any sender </span>
               </div>
             </td>
+
             <td class="td text-xs">
               <div class="flex flex-wrap gap-1">
                 <span v-if="t.do_move_to_inbox" class="badge badge-sent">
@@ -106,8 +113,8 @@
                 <span v-if="t.do_add_to_favorites" class="badge badge-sent">
                   Favourites
                 </span>
-                <span v-if="t.do_add_to_contacts" class="badge badge-sent">
-                  Contacts
+                <span v-if="t.do_mark_as_primary" class="badge badge-sent">
+                  Mark as primary
                 </span>
                 <span v-if="t.do_reply" class="badge badge-sent">Reply</span>
                 <span v-if="t.do_campaign_reply" class="badge badge-sent">
@@ -115,9 +122,11 @@
                 </span>
               </div>
             </td>
+
             <td class="td tabular-nums">
               {{ t.delay_seconds }} {{ t.delay_unit }}
             </td>
+
             <td class="td">
               <span
                 :class="['badge', t.is_active ? 'badge-sent' : 'badge-failed']"
@@ -125,6 +134,16 @@
                 {{ t.is_active ? "Active" : "Paused" }}
               </span>
             </td>
+
+            <td class="td">
+              <RouterLink
+                :to="`/warmup/taskrun/${t.id}`"
+                class="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-surface-off dark:border-border-dark dark:text-gray-200 dark:hover:bg-surface-dark-off"
+              >
+                View run logs
+              </RouterLink>
+            </td>
+
             <td class="td">
               <div class="flex gap-2">
                 <button class="btn btn-ghost btn-sm" @click="openEditModal(t)">
@@ -166,7 +185,6 @@
               />
             </div>
 
-            <!-- Multi-select mailboxes -->
             <div>
               <label class="form-label">Mailboxes *</label>
               <select
@@ -243,11 +261,11 @@
               </label>
               <label class="inline-flex items-center">
                 <input
-                  v-model="form.do_add_to_contacts"
+                  v-model="form.do_mark_as_primary"
                   type="checkbox"
                   class="mr-2"
                 />
-                Add sender to contacts
+                Mark as primary
               </label>
               <label class="inline-flex items-center">
                 <input v-model="form.do_reply" type="checkbox" class="mr-2" />
@@ -288,12 +306,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import { RouterLink } from "vue-router";
 import api from "@/api";
 import { useToastStore } from "@/stores/toast";
 
 const toast = useToastStore();
 
-interface ImapMailboxOption {
+interface MailboxOption {
   id: number;
   email: string;
   display_name: string | null;
@@ -308,7 +327,7 @@ interface WarmupTask {
   do_move_to_inbox: boolean;
   do_open: boolean;
   do_add_to_favorites: boolean;
-  do_add_to_contacts: boolean;
+  do_mark_as_primary: boolean;
   do_reply: boolean;
   do_campaign_reply: boolean;
   reply_message: string | null;
@@ -321,7 +340,7 @@ interface WarmupTask {
 }
 
 const tasks = ref<WarmupTask[]>([]);
-const mailboxes = ref<ImapMailboxOption[]>([]);
+const mailboxes = ref<MailboxOption[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -334,7 +353,7 @@ const form = ref({
   do_move_to_inbox: true,
   do_open: true,
   do_add_to_favorites: false,
-  do_add_to_contacts: false,
+  do_mark_as_primary: false,
   do_reply: true,
   do_campaign_reply: false,
   reply_message: "Thanks for your email!",
@@ -351,7 +370,7 @@ function resetForm() {
     do_move_to_inbox: true,
     do_open: true,
     do_add_to_favorites: false,
-    do_add_to_contacts: false,
+    do_mark_as_primary: false,
     do_reply: true,
     do_campaign_reply: false,
     reply_message: "Thanks for your email!",
@@ -376,7 +395,7 @@ function openEditModal(task: WarmupTask) {
     do_move_to_inbox: task.do_move_to_inbox,
     do_open: task.do_open,
     do_add_to_favorites: task.do_add_to_favorites,
-    do_add_to_contacts: task.do_add_to_contacts,
+    do_mark_as_primary: task.do_mark_as_primary,
     do_reply: task.do_reply,
     do_campaign_reply: task.do_campaign_reply,
     reply_message: task.reply_message || "",
@@ -400,11 +419,11 @@ function mailboxLabel(id: number) {
 
 async function loadMailboxes() {
   try {
-    const res = await api.get("/imap-mailboxes");
+    const res = await api.get("/mailboxes/warmup-options");
     mailboxes.value = res.data;
   } catch (e: any) {
     console.error(e);
-    toast.show("Failed to load IMAP mailboxes", "error");
+    toast.show("Failed to load mailboxes", "error");
   }
 }
 

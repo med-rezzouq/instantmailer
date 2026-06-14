@@ -89,6 +89,18 @@ const routes = [
         name: "warmup",
         component: () => import("@/views/WarmupView.vue"),
       },
+      {
+        path: "/oauthapps",
+        name: "oauth-apps",
+        component: () => import("@/views/OAuthAppsView.vue"),
+      },
+
+      {
+        path: "/warmup/taskrun/:taskid",
+        name: "warmup-task-run",
+        component: () => import("../views/WarmupTaskRunView.vue"),
+        meta: { requiresAuth: true },
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/dashboard" },

@@ -241,21 +241,13 @@ import { useToastStore } from "@/stores/toast";
 
 const toast = useToastStore();
 
-interface ImapMailbox {
+interface MailboxOption {
   id: number;
   email: string;
   display_name: string | null;
-  imap_host: string;
-  imap_port: number;
-  imap_ssl: boolean;
-  smtp_host: string;
-  smtp_port: number;
-  smtp_tls: boolean;
-  warmup_enabled: boolean;
-  is_active: boolean;
 }
 
-const mailboxes = ref<ImapMailbox[]>([]);
+const mailboxes = ref<MailboxOption[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
