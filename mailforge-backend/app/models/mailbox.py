@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+# app/models/mailbox.py
+
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -9,9 +11,10 @@ class Mailbox(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, index=True, nullable=False)
+    oauth_app_id = Column(Integer, ForeignKey("oauth_apps.id"), index=True, nullable=True)
 
     provider = Column(String, nullable=False)      # "google" | "microsoft"
-    email = Column(String, nullable=False)
+    email = Column(String, nullable=False, index=True)
     display_name = Column(String, nullable=True)
 
     access_token = Column(Text, nullable=False)
@@ -23,8 +26,13 @@ class Mailbox(Base):
     last_sync_at = Column(DateTime, nullable=True)
 
     created_at = Column(
-        DateTime, nullable=False, server_default=func.now()
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
     )
     updated_at = Column(
-        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
     )

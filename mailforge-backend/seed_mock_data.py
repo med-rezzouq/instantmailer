@@ -15,11 +15,11 @@ from app.models.campaign_sender import CampaignSender, SenderType
 from app.models.mailbox import Mailbox
 
 
+def utc_now_naive():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 async def get_or_create_mock_mailboxes(session, user_id: int):
-    """
-    Create a few mock connected mailboxes for testing the /mailboxes UI.
-    These use fake tokens and are not meant for real API calls.
-    """
     seed_mailboxes = [
         ("google", "warmup1@gmail.com", "Warmup Gmail 1"),
         ("google", "warmup2@gmail.com", "Warmup Gmail 2"),
@@ -42,10 +42,6 @@ async def get_or_create_mock_mailboxes(session, user_id: int):
             created.append(mailbox)
             continue
 
-        # make expiry naive to match TIMESTAMP WITHOUT TIME ZONE
-        expiry_aware = datetime.now(timezone.utc) + timedelta(hours=1)
-        expiry_naive = expiry_aware.replace(tzinfo=None)
-
         mailbox = Mailbox(
             user_id=user_id,
             provider=provider,
@@ -53,7 +49,7 @@ async def get_or_create_mock_mailboxes(session, user_id: int):
             display_name=display_name,
             access_token="FAKE_ACCESS_TOKEN_FOR_SEEDING",
             refresh_token="FAKE_REFRESH_TOKEN_FOR_SEEDING",
-            token_expiry=expiry_naive,
+            token_expiry=utc_now_naive() + timedelta(hours=1),
             scope="gmail.modify userinfo.email" if provider == "google" else "Mail.ReadWrite",
             warmup_enabled=True,
             last_sync_at=None,
@@ -108,7 +104,10 @@ async def get_or_create_tags(session, user_id):
 
     for name in tags_data:
         result = await session.execute(
-            select(ContactTag).where(ContactTag.user_id == user_id, ContactTag.name == name)
+            select(ContactTag).where(
+                ContactTag.user_id == user_id,
+                ContactTag.name == name,
+            )
         )
         tag = result.scalar_one_or_none()
         if not tag:
@@ -147,9 +146,9 @@ async def get_or_create_contacts(session, user_id, default_group: ContactGroup):
             )
             session.add(contact)
             await session.flush()
-        else:
-            if getattr(contact, "group_id", None) is None:
-                contact.group_id = default_group.id
+        elif getattr(contact, "group_id", None) is None:
+            contact.group_id = default_group.id
+
         contacts.append(contact)
 
     return contacts
@@ -207,7 +206,18 @@ async def get_or_create_smtp_config(session, user_id):
     return smtp_config
 
 
-async def create_campaign(session, user, contacts, smtp_config):
+async def get_or_create_campaign(session, user, contacts, smtp_config):
+    result = await session.execute(
+        select(Campaign).where(
+            Campaign.user_id == user.id,
+            Campaign.name == "Demo Campaign",
+        )
+    )
+    campaign = result.scalar_one_or_none()
+
+    if campaign:
+        return campaign
+
     campaign = Campaign(
         user_id=user.id,
         name="Demo Campaign",
@@ -220,7 +230,7 @@ async def create_campaign(session, user, contacts, smtp_config):
         is_followup=False,
         total_contacts=len(contacts),
         new_contacts_since_send=0,
-        scheduled_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        scheduled_at=utc_now_naive() + timedelta(hours=1),
         provider_id=smtp_config.id,
     )
     session.add(campaign)
@@ -270,15 +280,13 @@ async def create_campaign(session, user, contacts, smtp_config):
 async def main(seed_part: str = "all"):
     async with AsyncSessionLocal() as session:
         user = await get_or_create_user(session)
-
-        # Ensure default group exists for this user
         default_group = await get_or_create_default_group(session, user.id)
 
         if seed_part in ("all", "tags"):
             await get_or_create_tags(session, user.id)
 
         contacts = []
-        if seed_part in ("all", "contacts"):
+        if seed_part in ("all", "contacts", "campaign"):
             contacts = await get_or_create_contacts(session, user.id, default_group)
 
         if seed_part in ("all", "template"):
@@ -288,16 +296,16 @@ async def main(seed_part: str = "all"):
         if seed_part in ("all", "smtp", "campaign"):
             smtp_config = await get_or_create_smtp_config(session, user.id)
 
-        # seed mailbox connections
         if seed_part in ("all", "mailboxes"):
             await get_or_create_mock_mailboxes(session, user.id)
 
-        if seed_part == "campaign":
+        if seed_part in ("all", "campaign"):
             if not contacts:
                 contacts = await get_or_create_contacts(session, user.id, default_group)
             if not smtp_config:
                 smtp_config = await get_or_create_smtp_config(session, user.id)
-            campaign = await create_campaign(session, user, contacts, smtp_config)
+
+            campaign = await get_or_create_campaign(session, user, contacts, smtp_config)
             print(f"Campaign seed complete. Campaign ID: {campaign.id}")
 
         await session.commit()

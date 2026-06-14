@@ -10,7 +10,6 @@ from sqlalchemy import (
     Enum,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -36,9 +35,8 @@ class WarmupTask(Base):
     do_move_to_inbox = Column(Boolean, nullable=False, default=True)
     do_open = Column(Boolean, nullable=False, default=True)
     do_add_to_favorites = Column(Boolean, nullable=False, default=False)
-    do_add_to_contacts = Column(Boolean, nullable=False, default=False)
+    do_mark_as_primary = Column(Boolean, nullable=False, default=False)
     do_reply = Column(Boolean, nullable=False, default=True)
-    # Reply specifically to campaign emails
     do_campaign_reply = Column(Boolean, nullable=False, default=False)
     reply_message = Column(String(2000), nullable=True)
 
@@ -65,3 +63,4 @@ class WarmupTask(Base):
         nullable=False,
         default=datetime.utcnow,
     )
+
