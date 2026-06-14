@@ -11,17 +11,14 @@ dist/
 build/
 *.egg-info/
 
-
-notes.txt
-
 # Node
 node_modules/
 vite.svg
 *.log
 
-# Env files
-.env
-.env.*
+# Ignore local env variants only
+.env.local
+.env.*.local
 
 # OS / editor
 .DS_Store
