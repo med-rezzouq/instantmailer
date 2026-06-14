@@ -1,0 +1,134 @@
+med.rezzouq / 4463985@Med99
+
+docker compose exec api python seed_mock_data.py --only all
+
+
+to execute command the service name = db andnot mailforge-db, example:
+
+docker compose exec db psql -U mailforge -d mailforge -c "SELECT id, email FROM users ORDER BY id;"
+
+----
+update password 
+docker compose exec db psql -U mailforge -d mailforge -c "UPDATE users SET hashed_password = '$2b$12$7Gdd98iuua/LGPEs0I7wfuGIrSxQ59vBawgYqAwW0E8y7znM3mSne' WHERE email = 'med.rezzouq@gmail.com';"
+
+
+****************************************************************
+docker compose exec db psql -U mailforge -d mailforge  (to use the sql bash and be able to run sql sueries)
+
+SELECT event_type, occurred_at, metadata FROM email_events WHERE campaign_id = 2 AND contact_id = 1 ORDER BY occurred_at;
+
+docker compose logs --tail=200 api
+
+To exit sql batch (/q)
+
+{
+  "from_email": "medrezzouq9@gmail.com",
+  "to_email": "admin@academicsights.com",
+  "subject": "Re: Hello med how can i help you today",
+  "text_body": "Hi, yes I'm interested. Let's continue.",
+  "html_body": "<p>Hi, yes I'm interested. Let's continue.</p>",
+  "occurred_at": null,
+  "step_id": 20,
+  "step_number": 1
+}
+
+
+****************************************************
+-------------SUMMARIZE--------------
+
+so the entry point is the root main.py there we create a fastapi function and add the necessary routes that we import from all routers/files
+app.state.limiter = limiter , here we assigned this  limiter as global variable to be known in the app instance, its useful to limit number of requests per ip to avoid dos attacks or system overload. 
+The "router = APIRouter(prefix="/auth", tags=["Authentication"])"  is the prefix so we say all the path requests in this file are preffixed by auth its like shortcut so register will become auth/register in the Postman or swagger, and tags is to group them in swagger.
+response_model is the schema that validâtes our response so if any datatype or missing key which is part of rokenreponse schema, this valdation will failed.
+
+
+so response_model=TokenResponse is for format of data to be returned 
+and UserRegister in payload: UserRegister is the schema data format for input
+Without get_current_user, every protected route would need to repeat the same auth logic:
+
+async def me(current_user: User = Depends(get_current_user)):  this is get_current_user adefined function in dependencies.py the result forwarded as param into currentuser function and User is the type to be returned, Without get_current_user, every protected route would need to repeat the same auth logic:
+
+ we can also write async def me(current_user = Depends(get_current_user)): and it will work.
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+
+http://localhost:5050
+admin@mailforge.com
+Admin
+
+open query tool from left icon called "query tool Workspace"
+then i choose my server mailforge and connect.
+
+---------------
+swagger 
+
+http://localhost:8000/docs
+-----------
+
+----- AUTHENTIFICATION ---------
+i need go swagger the auth/login and fill my email password, then save the token bearer in authorize button in top.
+
+--------------------------------
+
+when i do any edit i need to check again the contact list and Campaign list from the frontend then to ensure Nothing broke.
+-----------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------
+-------------  TO BE DONE ----------------------------------------
+
+so Global stop conditions i need only to configure total bounces to stop , or unsubscribes or reports/complaints
+
+each sequence will have contacts assigned to it and i need to have a middle condition calculator that how many followup emails or reply followups and to stop a sequence , so after all followups i stop followups but after his reply i send followup replies, and if i reach this followup reply for example 2 times then i stick only to reply him again without sending again followup reply. also need need to flag the complaigner and bounces, and remove them from the Campaign but flag them globally in the blacklist, and for the unsubscribers, i flag them only in the current Campaign but not globally because they can be used in other Campaign.
+
+
+for the delay to send followup from initial email need to be from each last sent email to this contact not from the initial one, so i need a pivote table which includes the campaign id, sequence email id and the contact id and date of last email sent to him, and to know 
+
+##so before sending iniftial followup check:
+-so we check if we dont have any reply by him first, because after his first reply, we need not send or use any followup sequence email, we use only followup replyes or normal replyes sequences.
+-if we sent less than 3 followups or defined number:
+-if he didnt reply so if we dont have a row sequence in pivote with his contactid as sender and datetime greater than any row which we were the sender.
+- based on his last sequence if he has a row in pivote where his reply was for initial followup we use now reply sequence email, 
+-it might be that he can reply to one of the followups after he do a reply to our last normal reply.
+
+##so before sending normal reply:
+- we see if we have at least one reply by selecting last pivote row where he was the sender and he own great date, it might be that he can reply to one of the followups after he do a reply to our last normal reply, so once we get a reply from his we disable all followup sequences for him.
+
+
+##so before sending followup reply we check:
+-if we didnt reach max of followup replies by counting from pivote
+- we check if he check if we already sent the normal reply, because if we didnt replied we need to use normal reply first.
+
+
+>we should add email sequence type.<<<<<<
+
+for the delay to send followup from initial email need to be from each last sent email to this contact not from the initial one, so i need a pivote table which includes the campaign id, sequence email id and the contact id and date of last email sent to him, and to know 
+
+
+
+
+-----------------------------------------
+------------------#######-------------------------
+-------------------------------------------
+
+you know first time when we send initial emails i want while doing this process if suddenly we recieve a reply, priority is on sending the normal reply not continuing with initial followup for other contacts, but also  i want set a delay per contact for any last email sent to him, depends the last eventtype sent to him. so the delay time i will set, is normallyy how much to waite after sending not how much waite before sending. so if i want send for example a followup i need go and see what is the last  sequence email type was sent to this contact if it is inital email i need take the geenral delay campaign, if it is a followup i need take the delay time set on this foolowup sequence if it is a normal reply so i need to set two delays in the reply sequence its the delay after contact last reply, and delay after reply, where the followup replies will use later. and also we set in follow up reply the delay after followup reply.
+
+also to not forget this period should not be less than the general warming delay time which i need to set also in the campaign, so ineed always check the last email sent what ever the type is in our campaign. so first check if general warming time is respected and if its less than the delay after set in a email sequence thats fine we just waite more to respect also the email sequence delay, but if its greater, we need then to waite until this general delay complete then we send because we followed this delay instead.
+
+for followup we use if we dont have any reply from the contact is the want marked as "stop after first reply" should an event sequence email which is not a reply sequence event, and also if it is any other event which is not has stop after first reply,
+
+
+i want to edit something else its about the maxi followups so what does mean this is an additional field in form in main configuration of a campaign where we need store an integer only.
+and then in backend before sending any normal followup where we dont have any recieved reply before, we need to not send other followup if we already reached this max followups configured on the campaign,
+opposite to reply followups, if we have a new reply sequence we need to start counting followup replies only after the last reply sequence and not from start and then if its reaching max followup value configred in campaign then we dont send,
+----------------------------
+###############
+
+i dont understand how you do one campaign run lets say it has 50000k contact and it can take about 1 week due to high delay , how can we have a continioous run or just know where to resume if suddenly something stopped like the script execution
+
+##############################
+
+yes but what if we iterate in our contacts and first contact we check which event he is in, then we saw we only see an initial email was sent and no followup yet,
+
+then we decided to move to next contacts where no one has also any reply, so normally this first contact we should sent a followup.
+
+i mean we need group contacts per their current step, then we proceed them, until we finnish a priority then we move to next group based on their next priority step
+
