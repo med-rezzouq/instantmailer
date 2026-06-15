@@ -80,7 +80,6 @@ class WarmupTaskOut(BaseModel):
 
 
 class WarmupPerformIn(BaseModel):
-    selected_actions: list[str] | None = None
     delay_time: int | None = None
     sender_email: str | None = None
 
