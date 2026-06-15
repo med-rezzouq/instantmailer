@@ -30,7 +30,7 @@ class WarmupTaskBase(BaseModel):
 
 
 class WarmupTaskCreate(WarmupTaskBase):
-    pass
+    oauth_app_id: int
 
 
 class WarmupTaskUpdate(BaseModel):
@@ -56,6 +56,7 @@ class WarmupTaskOut(BaseModel):
     id: int
     user_id: int
     name: str
+    oauth_app_id: int | None
     mailbox_ids: list[int]
 
     do_move_to_inbox: bool
@@ -92,7 +93,6 @@ class WarmupPerformOut(BaseModel):
     runid: str | None = None
 
 
-
 class WarmupEventItemOut(BaseModel):
     id: int
     warmup_task_id: int
@@ -118,4 +118,4 @@ class WarmupRunGroupOut(BaseModel):
 
 class WarmupTaskRunViewOut(BaseModel):
     task_id: int
-    runs: list[WarmupRunGroupOut]   
+    runs: list[WarmupRunGroupOut]
