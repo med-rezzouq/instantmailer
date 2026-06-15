@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.database import engine, Base
 from app.middleware.rate_limit import limiter
 from app.routers import auth, oauth, oauth_apps, contacts, campaigns, templates, analytics, webhooks, smtp, campaign_v2, tracking, powermta, ai, tracking,mailboxes, imapmailboxes,warmup
-
+from app.routers.ai import router as ai_router
 
 settings = get_settings()
 
@@ -51,6 +51,7 @@ app.include_router(mailboxes.router)
 app.include_router(imapmailboxes.router)
 app.include_router(warmup.router)
 app.include_router(oauth_apps.router)
+app.include_router(ai_router)
 
 
 @app.get("/health")

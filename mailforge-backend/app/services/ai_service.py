@@ -1,26 +1,28 @@
 import httpx
-from app.config import get_settings
+from fastapi import HTTPException
 
-settings = get_settings()
+OLLAMA_URL = "http://ollama:11434/api/generate"
 
-async def generate_email_content(prompt: str, contact: dict, context: str = "") -> str:
-    rendered_prompt = prompt
-    for key, value in contact.items():
-        rendered_prompt = rendered_prompt.replace(f"{{{{{key}}}}}", str(value or ""))
+async def generate_with_ollama(prompt: str, model: str = "llama3.2:latest") -> str:
+    prompt = prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
 
-    payload = {
-        "model": settings.OLLAMA_MODEL,
-        "prompt": f"{context}\n\n{rendered_prompt}" if context else rendered_prompt,
-        "stream": False
-    }
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            res = await client.post(
+                OLLAMA_URL,
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                },
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach Ollama: {str(e)}")
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(f"{settings.OLLAMA_BASE_URL}/api/generate", json=payload)
-        resp.raise_for_status()
-        return resp.json()["response"]
+    if res.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Ollama error: {res.text}")
 
-async def list_ollama_models() -> list:
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
-        resp.raise_for_status()
-        return [m["name"] for m in resp.json().get("models", [])]
+    data = res.json()
+    return (data.get("response") or "").strip()
