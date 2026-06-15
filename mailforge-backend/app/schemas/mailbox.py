@@ -1,26 +1,24 @@
 # app/schemas/mailbox.py
 
 from datetime import datetime
-from typing import Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 
 class MailboxBase(BaseModel):
     provider: str
     email: EmailStr
-    display_name: Optional[str] = None
+    display_name: str | None = None
     warmup_enabled: bool = False
 
 
 class MailboxOut(MailboxBase):
     id: int
     user_id: int
-    oauth_app_id: Optional[int] = None
-    last_sync_at: Optional[datetime] = None
+    oauth_app_id: int | None = None
+    last_sync_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     oauth_app_name: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

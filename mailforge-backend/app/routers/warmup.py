@@ -1,6 +1,7 @@
 from typing import List
 import asyncio
 from uuid import uuid4
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
@@ -21,13 +22,12 @@ from app.schemas.warmup import (
     WarmupPerformOut,
     WarmupEventItemOut,
     WarmupRunGroupOut,
-    WarmupTaskRunViewOut
+    WarmupTaskRunViewOut,
 )
 from app.services.gmail_warmup import (
     collect_gmail_target_for_action,
     execute_gmail_action,
 )
-
 
 router = APIRouter(prefix="/warmup-tasks", tags=["warmup"])
 
@@ -42,12 +42,126 @@ async def list_warmup_tasks(
     return list(res.scalars().all())
 
 
+@router.get("/available-oauth-apps")
+async def list_available_oauth_apps(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task_stmt = select(WarmupTask.oauth_app_id).where(
+        WarmupTask.user_id == current_user.id,
+        WarmupTask.oauth_app_id.is_not(None),
+    )
+    task_res = await db.execute(task_stmt)
+    used_oauth_app_ids = [item for item in task_res.scalars().all() if item is not None]
+
+    oauth_stmt = select(OAuthApp).where(
+        OAuthApp.user_id == current_user.id,
+        OAuthApp.is_active.is_(True),
+    )
+    if used_oauth_app_ids:
+        oauth_stmt = oauth_stmt.where(OAuthApp.id.not_in(used_oauth_app_ids))
+
+    oauth_stmt = oauth_stmt.order_by(OAuthApp.id.desc())
+    oauth_res = await db.execute(oauth_stmt)
+    oauth_apps = list(oauth_res.scalars().all())
+
+    return [
+        {
+            "id": app.id,
+            "name": getattr(app, "name", None),
+            "client_id": getattr(app, "client_id", None),
+            "provider": getattr(app, "provider", None),
+        }
+        for app in oauth_apps
+    ]
+
+
+@router.get("/mailboxes-by-oauth-app/{oauth_app_id}")
+async def list_mailboxes_by_oauth_app(
+    oauth_app_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    oauth_stmt = select(OAuthApp).where(
+        OAuthApp.id == oauth_app_id,
+        OAuthApp.user_id == current_user.id,
+        OAuthApp.is_active.is_(True),
+    )
+    oauth_res = await db.execute(oauth_stmt)
+    oauth_app = oauth_res.scalar_one_or_none()
+
+    if not oauth_app:
+        raise HTTPException(status_code=404, detail="OAuth app not found")
+
+    mailbox_stmt = (
+        select(Mailbox)
+        .where(
+            Mailbox.user_id == current_user.id,
+            Mailbox.oauth_app_id == oauth_app_id,
+        )
+        .order_by(Mailbox.id.desc())
+    )
+    mailbox_res = await db.execute(mailbox_stmt)
+    mailboxes = list(mailbox_res.scalars().all())
+
+    return [
+        {
+            "id": mailbox.id,
+            "email": mailbox.email,
+            "display_name": getattr(mailbox, "display_name", None),
+            "provider": getattr(mailbox, "provider", None),
+            "oauth_app_id": mailbox.oauth_app_id,
+        }
+        for mailbox in mailboxes
+    ]
+
+
 @router.post("", response_model=WarmupTaskOut, status_code=status.HTTP_201_CREATED)
 async def create_warmup_task(
     task_in: WarmupTaskCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    oauth_stmt = select(OAuthApp).where(
+        OAuthApp.id == task_in.oauth_app_id,
+        OAuthApp.user_id == current_user.id,
+        OAuthApp.is_active.is_(True),
+    )
+    oauth_res = await db.execute(oauth_stmt)
+    oauth_app = oauth_res.scalar_one_or_none()
+
+    if not oauth_app:
+        raise HTTPException(status_code=404, detail="Selected OAuth app was not found")
+
+    existing_stmt = select(WarmupTask).where(
+        WarmupTask.user_id == current_user.id,
+        WarmupTask.oauth_app_id == task_in.oauth_app_id,
+    )
+    existing_res = await db.execute(existing_stmt)
+    existing_task = existing_res.scalar_one_or_none()
+
+    if existing_task:
+        raise HTTPException(
+            status_code=400,
+            detail="This OAuth app is already assigned to another warmup task",
+        )
+
+    mailbox_ids = task_in.mailbox_ids or []
+    if mailbox_ids:
+        mailbox_stmt = select(Mailbox).where(
+            Mailbox.user_id == current_user.id,
+            Mailbox.id.in_(mailbox_ids),
+            Mailbox.oauth_app_id == task_in.oauth_app_id,
+        )
+        mailbox_res = await db.execute(mailbox_stmt)
+        valid_mailboxes = list(mailbox_res.scalars().all())
+
+        if len(valid_mailboxes) != len(mailbox_ids):
+            raise HTTPException(
+                status_code=400,
+                detail="All selected mailboxes must belong to the selected OAuth app",
+            )
+
     task = WarmupTask(
         user_id=current_user.id,
         **task_in.model_dump(),
@@ -75,6 +189,24 @@ async def update_warmup_task(
         raise HTTPException(status_code=404, detail="Warmup task not found")
 
     data = task_in.model_dump(exclude_unset=True)
+
+    if "mailbox_ids" in data:
+        mailbox_ids = data["mailbox_ids"] or []
+        if mailbox_ids:
+            mailbox_stmt = select(Mailbox).where(
+                Mailbox.user_id == current_user.id,
+                Mailbox.id.in_(mailbox_ids),
+                Mailbox.oauth_app_id == task.oauth_app_id,
+            )
+            mailbox_res = await db.execute(mailbox_stmt)
+            valid_mailboxes = list(mailbox_res.scalars().all())
+
+            if len(valid_mailboxes) != len(mailbox_ids):
+                raise HTTPException(
+                    status_code=400,
+                    detail="All selected mailboxes must belong to the task OAuth app",
+                )
+
     for key, value in data.items():
         setattr(task, key, value)
 
@@ -122,6 +254,7 @@ def resolve_delay_seconds(task: WarmupTask, payload: WarmupPerformIn) -> int:
 def resolve_sender_email(task: WarmupTask, payload: WarmupPerformIn) -> str | None:
     sender = payload.sender_email or task.allowed_sender
     return sender.strip() if sender else None
+
 
 
 def get_task_allowed_actions(task: WarmupTask) -> list[WarmupAction]:
@@ -299,14 +432,14 @@ async def perform_warmup_task(
 
     mailbox = await pick_target_mailbox(db, task, current_user.id)
 
-    if not mailbox.oauth_app_id:
+    if not task.oauth_app_id:
         raise HTTPException(
             status_code=400,
-            detail="Selected mailbox is not linked to any OAuth app",
+            detail="Warmup task is not linked to any OAuth app",
         )
 
     oauth_stmt = select(OAuthApp).where(
-        OAuthApp.id == mailbox.oauth_app_id,
+        OAuthApp.id == task.oauth_app_id,
         OAuthApp.user_id == current_user.id,
         OAuthApp.is_active.is_(True),
     )
@@ -316,12 +449,21 @@ async def perform_warmup_task(
     if not oauth_app:
         raise HTTPException(
             status_code=404,
-            detail="OAuth app linked to selected mailbox was not found",
+            detail="OAuth app linked to warmup task was not found",
         )
 
-    selected_actions = resolve_selected_actions(task, payload)
+    if mailbox.oauth_app_id != task.oauth_app_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected mailbox does not belong to the task OAuth app",
+        )
+
+    selected_actions = get_task_allowed_actions(task)
     if not selected_actions:
-        raise HTTPException(status_code=400, detail="No actions selected")
+        raise HTTPException(
+            status_code=400,
+            detail="No actions are enabled on this warmup task",
+        )
 
     delay_seconds = resolve_delay_seconds(task, payload)
     sender_email = resolve_sender_email(task, payload)
@@ -344,8 +486,8 @@ async def perform_warmup_task(
             warmup_task_id=task.id,
             mailbox_id=mailbox.id,
             action=None,
-            status="started",
-            detail="Warmup run started",
+            status=WarmupEventStatus.started,
+            detail=f"Task started for {mailbox.email}",
             target_value=None,
             runid=runid,
         )
@@ -358,7 +500,7 @@ async def perform_warmup_task(
                 warmup_task_id=task.id,
                 mailbox_id=mailbox.id,
                 action=None,
-                status="finished",
+                status=WarmupEventStatus.finished,
                 detail="No unread matching email/message found for this warmup run",
                 target_value=None,
                 runid=runid,
@@ -384,7 +526,7 @@ async def perform_warmup_task(
             warmup_task_id=task.id,
             mailbox_id=mailbox.id,
             action=action_enum,
-            status="started",
+            status=WarmupEventStatus.started,
             detail=f"Action {action_name} selected for execution",
             target_value=target_value,
             runid=runid,
@@ -394,7 +536,7 @@ async def perform_warmup_task(
         await db.refresh(event)
 
         try:
-            event.status = "running"
+            event.status = WarmupEventStatus.running
             event.detail = f"Executing action {action_name}"
             await db.commit()
 
@@ -406,20 +548,20 @@ async def perform_warmup_task(
                 reply_message=task.reply_message,
             )
 
-            event.status = "finished"
+            event.status = WarmupEventStatus.finished
             event.detail = f"Action {action_name} executed successfully"
             await db.commit()
 
             executed_actions.append(action_name)
 
         except HTTPException as exc:
-            event.status = "finished_with_error"
+            event.status = WarmupEventStatus.finished_with_error
             event.detail = str(exc.detail)
             await db.commit()
             raise
 
         except Exception as exc:
-            event.status = "finished_with_error"
+            event.status = WarmupEventStatus.finished_with_error
             event.detail = str(exc)
             await db.commit()
             raise HTTPException(
@@ -437,11 +579,6 @@ async def perform_warmup_task(
         detail="Warmup task executed successfully",
         runid=runid,
     )
-
-
-
-
-
 
 
 @router.get("/taskrun/{task_id}", response_model=WarmupTaskRunViewOut)

@@ -17,8 +17,8 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.mailbox import Mailbox
 from app.models.oauth_apps import OAuthApp
+from app.models.warmup_task import WarmupTask
 from app.schemas.mailbox import MailboxOut
-
 
 GOOGLE_APP_MAX_MAILBOXES = int(os.getenv("GOOGLE_APP_MAX_MAILBOXES", "10"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")
@@ -45,35 +45,6 @@ def decode_state(value: str) -> dict:
         raise HTTPException(status_code=400, detail="Invalid state")
 
 
-async def get_available_google_oauth_app(
-    db: AsyncSession,
-    user_id: int,
-) -> OAuthApp | None:
-    stmt = (
-        select(
-            OAuthApp,
-            func.count(Mailbox.id).label("mailbox_count"),
-        )
-        .outerjoin(Mailbox, Mailbox.oauth_app_id == OAuthApp.id)
-        .where(
-            OAuthApp.user_id == user_id,
-            OAuthApp.provider == "google",
-            OAuthApp.is_active.is_(True),
-        )
-        .group_by(OAuthApp.id)
-        .order_by(OAuthApp.created_at.asc(), OAuthApp.id.asc())
-    )
-
-    res = await db.execute(stmt)
-    rows = res.all()
-
-    for oauth_app, mailbox_count in rows:
-        if mailbox_count < GOOGLE_APP_MAX_MAILBOXES:
-            return oauth_app
-
-    return None
-
-
 async def revoke_google_mailbox_access(mailbox: Mailbox) -> None:
     token_to_revoke = mailbox.refresh_token or mailbox.access_token
     if not token_to_revoke:
@@ -91,6 +62,44 @@ async def revoke_google_mailbox_access(mailbox: Mailbox) -> None:
             status_code=400,
             detail=f"Failed to revoke Google mailbox access: {res.text}",
         )
+
+
+async def get_task_with_oauth_app(
+    db: AsyncSession,
+    task_id: int,
+    user_id: int,
+) -> tuple[WarmupTask, OAuthApp]:
+    task_stmt = select(WarmupTask).where(
+        WarmupTask.id == task_id,
+        WarmupTask.user_id == user_id,
+    )
+    task_res = await db.execute(task_stmt)
+    task = task_res.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Warmup task not found")
+
+    if not task.oauth_app_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected warmup task is not linked to any OAuth app",
+        )
+
+    oauth_stmt = select(OAuthApp).where(
+        OAuthApp.id == task.oauth_app_id,
+        OAuthApp.user_id == user_id,
+        OAuthApp.is_active.is_(True),
+    )
+    oauth_res = await db.execute(oauth_stmt)
+    oauth_app = oauth_res.scalar_one_or_none()
+
+    if not oauth_app:
+        raise HTTPException(
+            status_code=404,
+            detail="OAuth app linked to selected warmup task was not found",
+        )
+
+    return task, oauth_app
 
 
 @router.get("", response_model=List[MailboxOut])
@@ -118,10 +127,12 @@ async def list_mailboxes(
             last_sync_at=mailbox.last_sync_at,
             created_at=mailbox.created_at,
             updated_at=mailbox.updated_at,
+            oauth_app_id=mailbox.oauth_app_id,
             oauth_app_name=oauth_app_name,
         )
         for mailbox, oauth_app_name in rows
     ]
+
 
 @router.get("/warmup-options", response_model=List[MailboxOut])
 async def list_warmup_mailboxes(
@@ -151,32 +162,43 @@ async def list_warmup_mailboxes(
             last_sync_at=mailbox.last_sync_at,
             created_at=mailbox.created_at,
             updated_at=mailbox.updated_at,
+            oauth_app_id=mailbox.oauth_app_id,
             oauth_app_name=oauth_app_name,
         )
         for mailbox, oauth_app_name in rows
     ]
 
 
-
-
-    
 @router.get("/connect/google")
 async def connect_google(
+    task_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    oauth_app = await get_available_google_oauth_app(db, current_user.id)
+    task, oauth_app = await get_task_with_oauth_app(db, task_id, current_user.id)
 
-    if not oauth_app:
+    if oauth_app.provider != "google":
         raise HTTPException(
-            status_code=409,
-            detail="No available Google OAuth app. All configured apps reached the mailbox limit.",
+            status_code=400,
+            detail="Selected task is linked to a non-Google OAuth app",
         )
 
     if not oauth_app.client_id or not oauth_app.client_secret:
         raise HTTPException(
             status_code=400,
             detail="Selected Google OAuth app is missing client credentials.",
+        )
+
+    count_stmt = select(func.count(Mailbox.id)).where(
+        Mailbox.oauth_app_id == oauth_app.id
+    )
+    count_res = await db.execute(count_stmt)
+    mailbox_count = count_res.scalar() or 0
+
+    if mailbox_count >= GOOGLE_APP_MAX_MAILBOXES:
+        raise HTTPException(
+            status_code=409,
+            detail="OAuth app reached the mailbox limit please add new oAuth app or contact the support.",
         )
 
     scope = oauth_app.scopes or (
@@ -187,6 +209,7 @@ async def connect_google(
     state = encode_state(
         {
             "user_id": current_user.id,
+            "task_id": task.id,
             "oauth_app_id": oauth_app.id,
             "provider": "google",
         }
@@ -215,11 +238,28 @@ async def google_callback(
     state_data = decode_state(state)
 
     user_id = state_data.get("user_id")
+    task_id = state_data.get("task_id")
     oauth_app_id = state_data.get("oauth_app_id")
     provider = state_data.get("provider")
 
-    if not user_id or not oauth_app_id or provider != "google":
+    if not user_id or not task_id or not oauth_app_id or provider != "google":
         raise HTTPException(status_code=400, detail="Invalid state payload")
+
+    task_stmt = select(WarmupTask).where(
+        WarmupTask.id == task_id,
+        WarmupTask.user_id == user_id,
+    )
+    task_res = await db.execute(task_stmt)
+    task = task_res.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="Warmup task not found")
+
+    if task.oauth_app_id != oauth_app_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Warmup task OAuth app does not match callback state",
+        )
 
     app_stmt = select(OAuthApp).where(
         OAuthApp.id == oauth_app_id,
@@ -308,7 +348,7 @@ async def google_callback(
         if mailbox_count >= GOOGLE_APP_MAX_MAILBOXES:
             raise HTTPException(
                 status_code=409,
-                detail="Selected Google OAuth app reached the mailbox limit.",
+                detail="OAuth app reached the mailbox limit. Please add a new OAuth app or contact support.",
             )
 
         mailbox = Mailbox(
@@ -327,9 +367,22 @@ async def google_callback(
 
     await db.commit()
     await db.refresh(mailbox)
-    return mailbox
 
+    oauth_name = getattr(oauth_app, "name", None)
 
+    return MailboxOut(
+        id=mailbox.id,
+        user_id=mailbox.user_id,
+        provider=mailbox.provider,
+        email=mailbox.email,
+        display_name=mailbox.display_name,
+        warmup_enabled=mailbox.warmup_enabled,
+        last_sync_at=mailbox.last_sync_at,
+        created_at=mailbox.created_at,
+        updated_at=mailbox.updated_at,
+        oauth_app_id=mailbox.oauth_app_id,
+        oauth_app_name=oauth_name,
+    )
 
 
 @router.delete("/{mailbox_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Enum,
+    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -27,6 +28,13 @@ class WarmupTask(Base):
     user_id = Column(Integer, nullable=False, index=True)
 
     name = Column(String(255), nullable=False)
+
+    oauth_app_id = Column(
+        Integer,
+        ForeignKey("oauth_apps.id"),
+        nullable=True,
+        index=True,
+    )
 
     # Multiple mailboxes stored as a JSONB array of mailbox IDs, e.g. [1, 2, 3]
     mailbox_ids = Column(JSONB, nullable=False, default=list)
@@ -63,4 +71,3 @@ class WarmupTask(Base):
         nullable=False,
         default=datetime.utcnow,
     )
-

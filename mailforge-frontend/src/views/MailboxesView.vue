@@ -10,7 +10,7 @@
       </div>
 
       <div class="flex gap-3">
-        <button class="btn btn-primary" @click="connectGoogle">
+        <button class="btn btn-primary" @click="openGoogleTaskModal">
           Connect Gmail
         </button>
         <button class="btn btn-secondary" @click="connectMicrosoft">
@@ -45,7 +45,7 @@
         <tbody>
           <tr v-if="loading">
             <td
-              colspan="7"
+              colspan="8"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               Loading...
@@ -54,7 +54,7 @@
 
           <tr v-else-if="!mailboxes.length">
             <td
-              colspan="7"
+              colspan="8"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               No mailboxes connected yet.
@@ -124,11 +124,82 @@
         </tbody>
       </table>
     </div>
+
+    <!-- GOOGLE CONNECT MODAL -->
+    <Teleport to="body">
+      <div
+        v-if="googleTaskModalOpen"
+        class="modal-overlay"
+        @click.self="closeGoogleTaskModal"
+      >
+        <div class="modal max-w-lg">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="font-bold">Connect Gmail</h2>
+            <button
+              @click="closeGoogleTaskModal"
+              class="text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label">Select warmup task *</label>
+            <select v-model="selectedTaskId" class="form-input">
+              <option :value="null" disabled>Select task</option>
+              <option
+                v-for="task in googleEligibleTasks"
+                :key="task.id"
+                :value="task.id"
+              >
+                {{ task.name
+                }}{{ task.oauth_app_name ? ` — ${task.oauth_app_name}` : "" }}
+              </option>
+            </select>
+            <p class="text-xs text-gray-500 mt-1">
+              The selected task decides which OAuth app will be used for Gmail
+              connection.
+            </p>
+          </div>
+
+          <div v-if="taskLoadError" class="mb-4 text-red-600 text-sm">
+            {{ taskLoadError }}
+          </div>
+
+          <div
+            v-if="
+              googleTaskModalOpen && !googleEligibleTasks.length && !taskLoading
+            "
+            class="mb-4 text-sm text-gray-500"
+          >
+            No Google-compatible warmup tasks found. Create a warmup task with a
+            Google OAuth app first.
+          </div>
+
+          <div class="flex gap-3 justify-end">
+            <button class="btn btn-ghost" @click="closeGoogleTaskModal">
+              Cancel
+            </button>
+            <button
+              class="btn btn-primary"
+              @click="connectGoogle"
+              :disabled="
+                !selectedTaskId ||
+                connectingGoogle ||
+                !googleEligibleTasks.length
+              "
+            >
+              {{ connectingGoogle ? "Redirecting..." : "Continue with Google" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import api from "@/api";
 import { useToastStore } from "@/stores/toast";
 
@@ -141,13 +212,32 @@ interface Mailbox {
   display_name: string | null;
   warmup_enabled: boolean;
   last_sync_at: string | null;
+  oauth_app_id?: number | null;
   oauth_app_name: string | null;
 }
 
+interface WarmupTaskOption {
+  id: number;
+  name: string;
+  oauth_app_id: number | null;
+  oauth_app_name?: string | null;
+}
+
 const mailboxes = ref<Mailbox[]>([]);
+const warmupTasks = ref<WarmupTaskOption[]>([]);
 const loading = ref(false);
+const taskLoading = ref(false);
 const error = ref<string | null>(null);
+const taskLoadError = ref<string | null>(null);
 const deletingId = ref<number | null>(null);
+const connectingGoogle = ref(false);
+
+const googleTaskModalOpen = ref(false);
+const selectedTaskId = ref<number | null>(null);
+
+const googleEligibleTasks = computed(() =>
+  warmupTasks.value.filter((task) => !!task.oauth_app_id),
+);
 
 onMounted(() => {
   load();
@@ -170,14 +260,62 @@ async function load() {
   }
 }
 
-async function connectGoogle() {
+async function loadWarmupTasks() {
+  taskLoading.value = true;
+  taskLoadError.value = null;
+
   try {
-    const res = await api.get("/mailboxes/connect/google");
+    const res = await api.get("/warmup-tasks");
+    warmupTasks.value = (res.data || []).map((task: any) => ({
+      id: task.id,
+      name: task.name,
+      oauth_app_id: task.oauth_app_id,
+      oauth_app_name:
+        task.oauth_app_name ??
+        (task.oauth_app_id ? `OAuth App #${task.oauth_app_id}` : null),
+    }));
+  } catch (e: any) {
+    console.error(e);
+    warmupTasks.value = [];
+    const message = e?.response?.data?.detail || "Failed to load warmup tasks";
+    taskLoadError.value = message;
+    toast.show(message, "error");
+  } finally {
+    taskLoading.value = false;
+  }
+}
+
+async function openGoogleTaskModal() {
+  selectedTaskId.value = null;
+  googleTaskModalOpen.value = true;
+  await loadWarmupTasks();
+}
+
+function closeGoogleTaskModal() {
+  googleTaskModalOpen.value = false;
+  selectedTaskId.value = null;
+  taskLoadError.value = null;
+}
+
+async function connectGoogle() {
+  if (!selectedTaskId.value) {
+    toast.show("Please select a warmup task first", "error");
+    return;
+  }
+
+  connectingGoogle.value = true;
+
+  try {
+    const res = await api.get("/mailboxes/connect/google", {
+      params: { task_id: selectedTaskId.value },
+    });
     window.location.href = res.data.auth_url;
   } catch (e: any) {
     console.error(e);
     const message = e?.response?.data?.detail || "Failed to start Google OAuth";
     toast.show(message, "error");
+  } finally {
+    connectingGoogle.value = false;
   }
 }
 
@@ -233,5 +371,13 @@ function formatDate(value: string | null) {
 
 .td {
   @apply px-4 py-3 align-middle;
+}
+
+.modal-overlay {
+  @apply fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4;
+}
+
+.modal {
+  @apply bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl p-8 w-full shadow-2xl;
 }
 </style>
