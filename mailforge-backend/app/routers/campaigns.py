@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,19 +12,38 @@ from app.models.analytics import EmailEvent
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.campaign_sender import CampaignSender, SenderType
 from app.models.campaign_step import CampaignStep
-from app.models.contact import Contact, contact_tags
+from app.models.contact import Contact, ContactGroup, contact_tags
 from app.models.smtp_config import SMTPConfig
 from app.models.user import User
 from app.schemas.campaign import (
     CampaignCreate,
-    CampaignUpdate,
     CampaignOut,
+    CampaignUpdate,
     InboundReplyIn,
 )
-from app.services.email_service import send_campaign
 from app.services.campaign_sequence_service import process_campaign_followups
+from app.services.email_service import send_campaign
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+
+
+async def _validate_campaign_group(
+    db: AsyncSession,
+    user_id: int,
+    group_id: int | None,
+) -> None:
+    if group_id is None:
+        raise HTTPException(status_code=400, detail="Contact group is required")
+
+    result = await db.execute(
+        select(ContactGroup).where(
+            ContactGroup.id == group_id,
+            ContactGroup.user_id == user_id,
+        )
+    )
+    group = result.scalar_one_or_none()
+    if not group:
+        raise HTTPException(status_code=400, detail="Invalid contact group")
 
 
 async def _sync_campaign_sender_from_provider(
@@ -32,14 +51,12 @@ async def _sync_campaign_sender_from_provider(
     campaign: Campaign,
     user_id: int,
 ) -> None:
-    # If no provider selected: remove any existing senders
     if campaign.provider_id is None:
         await db.execute(
             delete(CampaignSender).where(CampaignSender.campaign_id == campaign.id)
         )
         return
 
-    # Load the SMTP config for this provider
     result = await db.execute(
         select(SMTPConfig).where(
             SMTPConfig.id == campaign.provider_id,
@@ -48,10 +65,8 @@ async def _sync_campaign_sender_from_provider(
     )
     smtp = result.scalar_one_or_none()
     if not smtp:
-        # Invalid provider; optionally raise
         return
 
-    # Check for existing sender row
     result = await db.execute(
         select(CampaignSender).where(
             CampaignSender.campaign_id == campaign.id,
@@ -106,6 +121,7 @@ async def _campaign_to_out(db: AsyncSession, campaign: Campaign) -> CampaignOut:
         preview_text=campaign.preview_text,
         from_name=campaign.from_name,
         reply_to=campaign.reply_to,
+        group_id=campaign.group_id,
         provider_id=campaign.provider_id,
         segment_tags=campaign.segment_tags or [],
         track_opens=campaign.track_opens,
@@ -156,6 +172,8 @@ async def process_followups(
             user_id=current_user.id,
             db=db,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -187,6 +205,8 @@ async def create_campaign(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _validate_campaign_group(db, current_user.id, payload.group_id)
+
     data = payload.model_dump(exclude={"steps"})
 
     campaign = Campaign(
@@ -217,7 +237,6 @@ async def create_campaign(
         )
 
     await _sync_campaign_sender_from_provider(db, campaign, current_user.id)
-
     await db.commit()
 
     result = await db.execute(
@@ -273,7 +292,15 @@ async def update_campaign(
     if campaign.status == CampaignStatus.completed:
         raise HTTPException(status_code=400, detail="Cannot edit a completed campaign")
 
-    data = payload.model_dump(exclude_unset=True, exclude={"steps"})
+    if "group_id" in payload.model_fields_set:
+        await _validate_campaign_group(db, current_user.id, payload.group_id)
+
+    data = payload.model_dump(
+        exclude_unset=True,
+        exclude_none=True,
+        exclude={"steps"},
+    )
+
     for field, value in data.items():
         setattr(campaign, field, value)
 
@@ -303,7 +330,6 @@ async def update_campaign(
             )
 
     await _sync_campaign_sender_from_provider(db, campaign, current_user.id)
-
     await db.commit()
 
     result = await db.execute(
@@ -327,6 +353,7 @@ async def delete_campaign(
     campaign = await db.get(Campaign, campaign_id)
     if not campaign or campaign.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Campaign not found")
+
     await db.delete(campaign)
     await db.commit()
 
@@ -370,7 +397,11 @@ async def start_campaign(
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    if campaign.status not in (CampaignStatus.draft, CampaignStatus.scheduled, CampaignStatus.paused):
+    if campaign.status not in (
+        CampaignStatus.draft,
+        CampaignStatus.scheduled,
+        CampaignStatus.paused,
+    ):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot start campaign in status: {campaign.status}",

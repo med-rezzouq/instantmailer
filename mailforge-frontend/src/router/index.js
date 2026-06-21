@@ -101,6 +101,16 @@ const routes = [
         component: () => import("../views/WarmupTaskRunView.vue"),
         meta: { requiresAuth: true },
       },
+      {
+        path: "/mailboxes/oauth/yahoo/callback",
+        name: "YahooOAuthCallback",
+        component: () => import("@/views/YahooOAuthCallback.vue"),
+      },
+      {
+        path: "/labels",
+        name: "labels",
+        component: () => import("@/views/LabelsView.vue"),
+      },
     ],
   },
   { path: "/:pathMatch(.*)*", redirect: "/dashboard" },

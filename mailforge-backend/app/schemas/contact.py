@@ -1,47 +1,66 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr
+
 
 class ContactCreate(BaseModel):
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    group_id: int  # REQUIRED: which group/list this contact belongs to
-    tag_ids: Optional[List[int]] = []
+    group_id: int
+    is_system: bool = False
+
 
 class ContactUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     is_subscribed: Optional[bool] = None
-    group_id: Optional[int] = None  # allow moving contact to a different group
-    tag_ids: Optional[List[int]] = None
+    group_id: Optional[int] = None
+    is_system: Optional[bool] = None
+
 
 class ContactOut(BaseModel):
     id: int
     email: str
-    first_name: Optional[str]
-    last_name: Optional[str]
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    is_system: bool
     is_subscribed: bool
     open_count: int
     click_count: int
     created_at: datetime
-    group_id: int  # so frontend knows which list it belongs to
-    model_config = {"from_attributes": True}
+    group_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ContactImportItem(BaseModel):
+    email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    group_id: int
+    is_system: bool = False
+
 
 class ContactImport(BaseModel):
-    contacts: List[ContactCreate]
+    contacts: List[ContactImportItem]
+
 
 class TagCreate(BaseModel):
     name: str
 
+
 class TagOut(BaseModel):
     id: int
     name: str
-    model_config = {"from_attributes": True}
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ContactGroupBase(BaseModel):
     name: str
+    is_system: bool = False
 
 
 class ContactGroupCreate(ContactGroupBase):
@@ -55,5 +74,4 @@ class ContactGroupUpdate(ContactGroupBase):
 class ContactGroupOut(ContactGroupBase):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

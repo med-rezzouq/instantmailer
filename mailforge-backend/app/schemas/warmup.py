@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class WarmupDelayUnit(str, Enum):
@@ -10,9 +10,16 @@ class WarmupDelayUnit(str, Enum):
     hours = "hours"
 
 
+class WarmupTaskProtocol(str, Enum):
+    oauth = "oauth"
+    imap = "imap"
+
+
 class WarmupTaskBase(BaseModel):
     name: str
     mailbox_ids: list[int]
+
+    protocol: WarmupTaskProtocol = WarmupTaskProtocol.oauth
 
     do_move_to_inbox: bool = True
     do_open: bool = True
@@ -20,6 +27,7 @@ class WarmupTaskBase(BaseModel):
     do_mark_as_primary: bool = False
     do_reply: bool = True
     do_campaign_reply: bool = False
+    do_detect_reply_event: bool = False
     reply_message: str | None = None
 
     delay_seconds: int = 60
@@ -30,12 +38,32 @@ class WarmupTaskBase(BaseModel):
 
 
 class WarmupTaskCreate(WarmupTaskBase):
-    oauth_app_id: int
+    oauth_app_id: int | None = None
+
+    @model_validator(mode="after")
+    def validate_create_rules(self):
+        if self.protocol == WarmupTaskProtocol.oauth and not self.oauth_app_id:
+            raise ValueError("oauth_app_id is required for OAuth warmup tasks")
+
+        if self.protocol == WarmupTaskProtocol.imap:
+            if self.do_mark_as_primary:
+                raise ValueError("do_mark_as_primary is not supported for IMAP warmup tasks")
+            if self.do_reply:
+                raise ValueError("do_reply is not supported for IMAP warmup tasks")
+            if self.do_campaign_reply:
+                raise ValueError("do_campaign_reply is not supported for IMAP warmup tasks")
+            if self.reply_message:
+                raise ValueError("reply_message must be empty for IMAP warmup tasks")
+
+        return self
 
 
 class WarmupTaskUpdate(BaseModel):
     name: str | None = None
     mailbox_ids: list[int] | None = None
+
+    protocol: WarmupTaskProtocol | None = None
+    oauth_app_id: int | None = None
 
     do_move_to_inbox: bool | None = None
     do_open: bool | None = None
@@ -43,6 +71,7 @@ class WarmupTaskUpdate(BaseModel):
     do_mark_as_primary: bool | None = None
     do_reply: bool | None = None
     do_campaign_reply: bool | None = None
+    do_detect_reply_event: bool | None = None
     reply_message: str | None = None
 
     delay_seconds: int | None = None
@@ -51,12 +80,34 @@ class WarmupTaskUpdate(BaseModel):
     allowed_sender: str | None = None
     is_active: bool | None = None
 
+    @model_validator(mode="after")
+    def validate_update_rules(self):
+        effective_protocol = self.protocol
+
+        if effective_protocol == WarmupTaskProtocol.oauth and self.oauth_app_id is None:
+            pass
+
+        if effective_protocol == WarmupTaskProtocol.imap:
+            if self.do_mark_as_primary is True:
+                raise ValueError("do_mark_as_primary is not supported for IMAP warmup tasks")
+            if self.do_reply is True:
+                raise ValueError("do_reply is not supported for IMAP warmup tasks")
+            if self.do_campaign_reply is True:
+                raise ValueError("do_campaign_reply is not supported for IMAP warmup tasks")
+            if self.reply_message not in (None, ""):
+                raise ValueError("reply_message must be empty for IMAP warmup tasks")
+
+        return self
+
 
 class WarmupTaskOut(BaseModel):
     id: int
     user_id: int
     name: str
+    protocol: WarmupTaskProtocol
     oauth_app_id: int | None
+    oauth_app_name: str | None = None
+    oauth_app_provider: str | None = None
     mailbox_ids: list[int]
 
     do_move_to_inbox: bool
@@ -65,6 +116,7 @@ class WarmupTaskOut(BaseModel):
     do_mark_as_primary: bool
     do_reply: bool
     do_campaign_reply: bool
+    do_detect_reply_event: bool
     reply_message: str | None
 
     delay_seconds: int

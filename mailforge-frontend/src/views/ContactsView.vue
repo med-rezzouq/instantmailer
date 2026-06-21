@@ -24,6 +24,7 @@
         </div>
       </div>
 
+      <!-- Normal groups table -->
       <div
         class="overflow-x-auto rounded-xl border border-border dark:border-border-dark"
       >
@@ -32,21 +33,21 @@
             <tr class="bg-surface-off dark:bg-surface-dark-off">
               <th class="th">ID</th>
               <th class="th">Name</th>
-              <th class="th">Contacts</th>
               <th class="th">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="!groups.length">
+            <tr v-if="!normalGroups.length">
               <td
-                colspan="4"
+                colspan="3"
                 class="text-center py-12 text-gray-400 dark:text-gray-600"
               >
                 No groups yet. Add your first group above.
               </td>
             </tr>
+
             <tr
-              v-for="g in groups"
+              v-for="g in normalGroups"
               :key="g.id"
               class="hover:bg-surface-off dark:hover:bg-surface-dark-off border-b border-border dark:border-border-dark last:border-0"
             >
@@ -60,9 +61,6 @@
                 >
                   {{ g.name }}
                 </RouterLink>
-              </td>
-              <td class="td tabular-nums">
-                {{ g.contact_count ?? "—" }}
               </td>
               <td class="td">
                 <div class="flex gap-2">
@@ -82,6 +80,49 @@
         </table>
       </div>
 
+      <!-- Protected groups table -->
+      <div v-if="systemGroups.length" class="mt-8">
+        <div class="page-subtitle mb-3">Protected Groups</div>
+
+        <div
+          class="overflow-x-auto rounded-xl border border-border dark:border-border-dark"
+        >
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-surface-off dark:bg-surface-dark-off">
+                <th class="th">ID</th>
+                <th class="th">Name</th>
+                <th class="th">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="g in systemGroups"
+                :key="g.id"
+                class="hover:bg-surface-off dark:hover:bg-surface-dark-off border-b border-border dark:border-border-dark last:border-0"
+              >
+                <td class="td text-gray-500 dark:text-gray-400">
+                  {{ g.id }}
+                </td>
+                <td class="td font-semibold">
+                  <RouterLink
+                    :to="`/contacts/${g.id}`"
+                    class="text-primary hover:underline"
+                  >
+                    {{ g.name }}
+                  </RouterLink>
+                </td>
+                <td class="td">
+                  <span class="text-xs text-gray-400 dark:text-gray-500">
+                    Protected
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Add Group Modal -->
       <Teleport to="body">
         <div
@@ -99,7 +140,8 @@
                 ✕
               </button>
             </div>
-            <div class="mb-6">
+
+            <div class="mb-4">
               <label class="form-label">Group Name *</label>
               <input
                 v-model="newGroup.name"
@@ -107,6 +149,20 @@
                 placeholder="Default, Prospects, Customers..."
               />
             </div>
+
+            <div class="mb-6">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  v-model="newGroup.is_system"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-border dark:border-border-dark"
+                />
+                <span class="text-sm text-gray-600 dark:text-gray-300">
+                  Is system group
+                </span>
+              </label>
+            </div>
+
             <div class="flex gap-3 justify-end">
               <button class="btn btn-ghost" @click="closeAddGroupModal">
                 Cancel
@@ -136,7 +192,8 @@
                 ✕
               </button>
             </div>
-            <div class="mb-6">
+
+            <div class="mb-4">
               <label class="form-label">Group Name *</label>
               <input
                 v-model="editGroup.name"
@@ -144,11 +201,32 @@
                 placeholder="Group name"
               />
             </div>
+
+            <div class="mb-6">
+              <label class="flex items-center gap-3 cursor-pointer">
+                <input
+                  v-model="editGroup.is_system"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-border dark:border-border-dark"
+                  :disabled="editGroupLocked"
+                />
+                <span class="text-sm text-gray-600 dark:text-gray-300">
+                  Is system group
+                </span>
+              </label>
+            </div>
+
             <div class="flex gap-3 justify-end">
               <button class="btn btn-ghost" @click="closeEditGroupModal">
                 Cancel
               </button>
-              <button class="btn btn-primary" @click="updateGroup">Save</button>
+              <button
+                class="btn btn-primary"
+                @click="updateGroup"
+                :disabled="editGroupLocked"
+              >
+                Save
+              </button>
             </div>
           </div>
         </div>
@@ -162,7 +240,7 @@
           <div class="page-title">
             Contacts
             <span v-if="groupId" class="text-sm text-gray-400 ml-2">
-              (Group ID: {{ groupId }})
+              (Group: {{ currentGroupName || groupId }})
             </span>
           </div>
           <div class="page-subtitle">{{ contacts.length }} contacts</div>
@@ -177,7 +255,7 @@
           </button>
           <button
             class="btn btn-primary"
-            @click="addModal = true"
+            @click="openAddContactModal"
             :disabled="!groupId"
             :title="
               groupId ? 'Add contact to this group' : 'Select a group first'
@@ -235,7 +313,6 @@
             </tr>
           </thead>
           <tbody>
-            <!-- Group selected but empty -->
             <tr v-if="!contacts.length">
               <td
                 colspan="6"
@@ -245,7 +322,6 @@
               </td>
             </tr>
 
-            <!-- Contacts in this group -->
             <tr
               v-for="c in contacts"
               :key="c.id"
@@ -273,11 +349,15 @@
               </td>
               <td class="td">
                 <button
+                  v-if="canDeleteContact(c)"
                   class="btn btn-danger btn-sm"
                   @click="deleteContact(c.id)"
                 >
                   Delete
                 </button>
+                <span v-else class="text-xs text-gray-400 dark:text-gray-500">
+                  Protected
+                </span>
               </td>
             </tr>
           </tbody>
@@ -289,13 +369,13 @@
         <div
           v-if="addModal"
           class="modal-overlay"
-          @click.self="addModal = false"
+          @click.self="closeAddContactModal"
         >
           <div class="modal">
             <div class="flex items-center justify-between mb-6">
               <h2 class="font-bold">Add Contact</h2>
               <button
-                @click="addModal = false"
+                @click="closeAddContactModal"
                 class="text-gray-400 hover:text-gray-600"
               >
                 ✕
@@ -329,7 +409,7 @@
               />
             </div>
             <div class="flex gap-3 justify-end">
-              <button class="btn btn-ghost" @click="addModal = false">
+              <button class="btn btn-ghost" @click="closeAddContactModal">
                 Cancel
               </button>
               <button class="btn btn-primary" @click="addContact">
@@ -344,22 +424,29 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from "vue";
-import { useRoute, RouterLink } from "vue-router";
+import { computed, onMounted, ref, watch } from "vue";
+import { RouterLink, useRoute } from "vue-router";
 import api from "@/api";
 import { useToastStore } from "@/stores/toast";
 
 const toast = useToastStore();
 const route = useRoute();
 
-// groups state
 const groups = ref([]);
 const addGroupModal = ref(false);
 const editGroupModal = ref(false);
-const newGroup = ref({ name: "" });
-const editGroup = ref({ id: null, name: "" });
 
-// contacts state
+const newGroup = ref({
+  name: "",
+  is_system: false,
+});
+
+const editGroup = ref({
+  id: null,
+  name: "",
+  is_system: false,
+});
+
 const contacts = ref([]);
 const search = ref("");
 const addModal = ref(false);
@@ -372,50 +459,79 @@ const newContact = ref({
   last_name: "",
   email: "",
   group_id: null,
+  is_system: false,
 });
+
+const normalGroups = computed(() => groups.value.filter((g) => !g.is_system));
+const systemGroups = computed(() => groups.value.filter((g) => g.is_system));
+
+const currentGroup = computed(
+  () =>
+    groups.value.find((g) => Number(g.id) === Number(groupId.value)) || null,
+);
+
+const currentGroupName = computed(() => currentGroup.value?.name || "");
+const editGroupLocked = computed(() => !!editGroup.value.is_system);
+
+const contactGroupMap = computed(() => {
+  const map = {};
+  groups.value.forEach((g) => {
+    map[g.id] = g;
+  });
+  return map;
+});
+
+const canDeleteContact = (contact) => {
+  if (contact.is_system) return false;
+  const group = contactGroupMap.value[contact.group_id];
+  return !group?.is_system;
+};
 
 function syncGroupFromRoute() {
   const raw = route.params.groupId;
   const parsed = raw ? Number(raw) : NaN;
   groupId.value = Number.isNaN(parsed) ? null : parsed;
   newContact.value.group_id = groupId.value;
+  newContact.value.is_system = !!currentGroup.value?.is_system;
 }
 
-onMounted(() => {
+onMounted(async () => {
   syncGroupFromRoute();
-  load();
+  await load();
 });
 
 watch(
   () => route.params.groupId,
-  () => {
+  async () => {
     syncGroupFromRoute();
-    load();
+    await load();
   },
 );
 
-// decide which data to load
 async function load() {
-  if (!groupId.value) {
-    await loadGroups();
-  } else {
+  await loadGroups();
+
+  if (groupId.value) {
     await loadContacts();
+  } else {
+    contacts.value = [];
   }
+
+  newContact.value.group_id = groupId.value;
+  newContact.value.is_system = !!currentGroup.value?.is_system;
 }
 
-// ========== GROUPS API ==========
 async function loadGroups() {
   try {
     const res = await api.get("/contacts/groups");
     groups.value = res.data;
-    contacts.value = [];
   } catch (e) {
     toast.show("Failed to load groups", "error");
   }
 }
 
 function openAddGroupModal() {
-  newGroup.value = { name: "" };
+  newGroup.value = { name: "", is_system: false };
   addGroupModal.value = true;
 }
 
@@ -424,12 +540,18 @@ function closeAddGroupModal() {
 }
 
 async function addGroup() {
-  if (!newGroup.value.name.trim()) {
+  const name = newGroup.value.name.trim();
+
+  if (!name) {
     toast.show("Group name is required", "error");
     return;
   }
+
   try {
-    await api.post("/contacts/groups", newGroup.value);
+    await api.post("/contacts/groups", {
+      name,
+      is_system: newGroup.value.is_system,
+    });
     toast.show("Group added!", "success");
     closeAddGroupModal();
     await loadGroups();
@@ -439,9 +561,15 @@ async function addGroup() {
 }
 
 function openEditGroupModal(group) {
+  if (group.is_system) {
+    toast.show("Protected groups cannot be edited", "error");
+    return;
+  }
+
   editGroup.value = {
     id: group.id,
     name: group.name,
+    is_system: !!group.is_system,
   };
   editGroupModal.value = true;
 }
@@ -451,13 +579,17 @@ function closeEditGroupModal() {
 }
 
 async function updateGroup() {
-  if (!editGroup.value.name.trim()) {
+  const name = editGroup.value.name.trim();
+
+  if (!name) {
     toast.show("Group name is required", "error");
     return;
   }
+
   try {
     await api.put(`/contacts/groups/${editGroup.value.id}`, {
-      name: editGroup.value.name,
+      name,
+      is_system: editGroup.value.is_system,
     });
     toast.show("Group updated!", "success");
     closeEditGroupModal();
@@ -468,7 +600,13 @@ async function updateGroup() {
 }
 
 async function deleteGroup(group) {
+  if (group.is_system) {
+    toast.show("Protected groups cannot be deleted", "error");
+    return;
+  }
+
   if (!confirm(`Delete group "${group.name}"?`)) return;
+
   try {
     await api.delete(`/contacts/groups/${group.id}`);
     toast.show("Group deleted", "success");
@@ -478,16 +616,17 @@ async function deleteGroup(group) {
   }
 }
 
-// ========== CONTACTS API ==========
 async function loadContacts() {
   if (!groupId.value) {
     contacts.value = [];
     return;
   }
+
   try {
     const params = new URLSearchParams();
     params.set("limit", "200");
     params.set("group_id", String(groupId.value));
+
     if (search.value) {
       params.set("search", search.value);
     }
@@ -499,26 +638,62 @@ async function loadContacts() {
   }
 }
 
-async function addContact() {
-  if (!newContact.value.email) {
-    toast.show("Email is required", "error");
-    return;
-  }
+function openAddContactModal() {
   if (!groupId.value) {
     toast.show("Select a group first", "error");
     return;
   }
+
+  newContact.value = {
+    first_name: "",
+    last_name: "",
+    email: "",
+    group_id: groupId.value,
+    is_system: !!currentGroup.value?.is_system,
+  };
+  addModal.value = true;
+}
+
+function closeAddContactModal() {
+  addModal.value = false;
+}
+
+async function addContact() {
+  const email = newContact.value.email?.trim();
+
+  if (!email) {
+    toast.show("Email is required", "error");
+    return;
+  }
+
+  if (!groupId.value) {
+    toast.show("Select a group first", "error");
+    return;
+  }
+
   newContact.value.group_id = groupId.value;
+  newContact.value.is_system = !!currentGroup.value?.is_system;
+
   try {
-    await api.post("/contacts", newContact.value);
+    await api.post("/contacts", {
+      email,
+      first_name: newContact.value.first_name?.trim() || null,
+      last_name: newContact.value.last_name?.trim() || null,
+      group_id: newContact.value.group_id,
+      is_system: newContact.value.is_system,
+    });
+
     toast.show("Contact added!", "success");
-    addModal.value = false;
+    closeAddContactModal();
+
     newContact.value = {
       first_name: "",
       last_name: "",
       email: "",
       group_id: groupId.value,
+      is_system: !!currentGroup.value?.is_system,
     };
+
     await loadContacts();
   } catch (e) {
     toast.show(e.response?.data?.detail || e.message, "error");
@@ -526,13 +701,31 @@ async function addContact() {
 }
 
 async function deleteContact(id) {
+  const contact = contacts.value.find((c) => c.id === id);
+  if (!contact) {
+    toast.show("Contact not found", "error");
+    return;
+  }
+
+  if (contact.is_system) {
+    toast.show("Cannot delete protected contacts", "error");
+    return;
+  }
+
+  const group = contactGroupMap.value[contact.group_id];
+  if (group?.is_system) {
+    toast.show("Cannot delete contacts from protected groups", "error");
+    return;
+  }
+
   if (!confirm("Delete this contact?")) return;
+
   try {
     await api.delete(`/contacts/${id}`);
     toast.show("Deleted", "success");
     await loadContacts();
   } catch (e) {
-    toast.show(e.message, "error");
+    toast.show(e.response?.data?.detail || e.message, "error");
   }
 }
 </script>
