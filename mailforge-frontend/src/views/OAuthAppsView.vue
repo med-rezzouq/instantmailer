@@ -38,6 +38,7 @@
             <th class="th">Client ID</th>
             <th class="th">Project ID</th>
             <th class="th">Owner Email</th>
+            <th class="th">Max Mailboxes</th>
             <th class="th">Secret</th>
             <th class="th">Actions</th>
           </tr>
@@ -45,7 +46,7 @@
         <tbody>
           <tr v-if="loading">
             <td
-              colspan="8"
+              colspan="9"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               Loading...
@@ -54,7 +55,7 @@
 
           <tr v-else-if="!oauthApps.length">
             <td
-              colspan="8"
+              colspan="9"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               No OAuth apps yet. Add your first one above.
@@ -89,6 +90,10 @@
 
             <td class="td text-xs text-gray-500 dark:text-gray-400 break-all">
               {{ app.owner_email || "—" }}
+            </td>
+
+            <td class="td text-sm font-medium">
+              {{ app.max_mailboxes }}
             </td>
 
             <td class="td text-xs text-gray-500 dark:text-gray-400">
@@ -134,15 +139,19 @@
           <div class="grid grid-cols-2 gap-4 mb-6">
             <div class="col-span-2">
               <label class="form-label">Provider *</label>
-              <select v-model="form.provider" class="form-input">
+              <select
+                v-model="form.provider"
+                class="form-input"
+                :disabled="!!editingId"
+              >
                 <option value="google">Google</option>
                 <option value="microsoft">Microsoft</option>
                 <option value="yahoo">Yahoo</option>
-                <option value="gmx">GMX</option>
-                <option value="rediffmail">Rediffmail</option>
-                <option value="protonmail">ProtonMail</option>
-                <option value="icloud">iCloud</option>
+                <option value="aol">AOL</option>
               </select>
+              <p v-if="editingId" class="text-xs text-gray-500 mt-1">
+                Provider cannot be changed after creation.
+              </p>
             </div>
 
             <div class="col-span-2">
@@ -188,6 +197,25 @@
                 "
               />
             </div>
+
+            <div class="col-span-2">
+              <label class="form-label">Max Mailboxes *</label>
+              <input
+                v-model.number="form.max_mailboxes"
+                type="number"
+                min="1"
+                class="form-input"
+                :disabled="!!editingId"
+                placeholder="2"
+              />
+              <p class="text-xs text-gray-500 mt-1">
+                {{
+                  editingId
+                    ? "Mailbox limit is set when the OAuth app is created and cannot be changed later."
+                    : "Set the maximum number of mailboxes that can be linked to this OAuth app."
+                }}
+              </p>
+            </div>
           </div>
 
           <div class="flex gap-3 justify-end">
@@ -219,14 +247,7 @@ import { useToastStore } from "@/stores/toast";
 
 const toast = useToastStore();
 
-type Provider =
-  | "google"
-  | "microsoft"
-  | "yahoo"
-  | "gmx"
-  | "rediffmail"
-  | "protonmail"
-  | "icloud";
+type Provider = "google" | "microsoft" | "yahoo" | "aol";
 
 interface OAuthApp {
   id: number;
@@ -236,6 +257,7 @@ interface OAuthApp {
   client_secret_masked?: string | null;
   project_id?: string | null;
   owner_email?: string | null;
+  max_mailboxes: number;
 }
 
 const oauthApps = ref<OAuthApp[]>([]);
@@ -251,6 +273,7 @@ const form = ref({
   owner_email: "",
   client_id: "",
   client_secret: "",
+  max_mailboxes: 2,
 });
 
 function resetForm() {
@@ -260,6 +283,7 @@ function resetForm() {
     owner_email: "",
     client_id: "",
     client_secret: "",
+    max_mailboxes: 2,
   };
 }
 
@@ -277,6 +301,7 @@ function openEditModal(app: OAuthApp) {
     owner_email: app.owner_email || "",
     client_id: app.client_id,
     client_secret: "",
+    max_mailboxes: app.max_mailboxes,
   };
   modalOpen.value = true;
 }
@@ -284,6 +309,7 @@ function openEditModal(app: OAuthApp) {
 function closeModal() {
   modalOpen.value = false;
   editingId.value = null;
+  resetForm();
 }
 
 async function loadOAuthApps() {
@@ -314,6 +340,14 @@ async function submitForm() {
     return;
   }
 
+  if (
+    !editingId.value &&
+    (!form.value.max_mailboxes || form.value.max_mailboxes < 1)
+  ) {
+    toast.show("Max mailboxes must be at least 1", "error");
+    return;
+  }
+
   saving.value = true;
   error.value = null;
 
@@ -327,6 +361,10 @@ async function submitForm() {
 
     if (form.value.client_secret) {
       payload.client_secret = form.value.client_secret;
+    }
+
+    if (!editingId.value) {
+      payload.max_mailboxes = form.value.max_mailboxes;
     }
 
     if (editingId.value) {
@@ -343,9 +381,10 @@ async function submitForm() {
     closeModal();
   } catch (e: any) {
     console.error("OAuth save error:", e?.response?.data || e);
-    const msg = e?.response?.data?.detail
-      ? JSON.stringify(e.response.data.detail)
-      : "Failed to save OAuth app";
+    const msg =
+      typeof e?.response?.data?.detail === "string"
+        ? e.response.data.detail
+        : "Failed to save OAuth app";
     error.value = msg;
     toast.show(msg, "error");
   } finally {

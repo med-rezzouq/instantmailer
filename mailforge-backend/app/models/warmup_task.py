@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -21,6 +22,11 @@ class WarmupDelayUnit(enum.Enum):
     hours = "hours"
 
 
+class WarmupTaskProtocol(enum.Enum):
+    oauth = "oauth"
+    imap = "imap"
+
+
 class WarmupTask(Base):
     __tablename__ = "warmup_tasks"
 
@@ -29,6 +35,12 @@ class WarmupTask(Base):
 
     name = Column(String(255), nullable=False)
 
+    protocol = Column(
+        Enum(WarmupTaskProtocol, name="warmuptaskprotocol"),
+        nullable=False,
+        default=WarmupTaskProtocol.oauth,
+    )
+
     oauth_app_id = Column(
         Integer,
         ForeignKey("oauth_apps.id"),
@@ -36,19 +48,19 @@ class WarmupTask(Base):
         index=True,
     )
 
-    # Multiple mailboxes stored as a JSONB array of mailbox IDs, e.g. [1, 2, 3]
+    oauth_app = relationship("OAuthApp")
+
     mailbox_ids = Column(JSONB, nullable=False, default=list)
 
-    # Actions to perform during warmup
     do_move_to_inbox = Column(Boolean, nullable=False, default=True)
     do_open = Column(Boolean, nullable=False, default=True)
     do_add_to_favorites = Column(Boolean, nullable=False, default=False)
     do_mark_as_primary = Column(Boolean, nullable=False, default=False)
     do_reply = Column(Boolean, nullable=False, default=True)
     do_campaign_reply = Column(Boolean, nullable=False, default=False)
+    do_detect_reply_event = Column(Boolean, nullable=False, default=False)
     reply_message = Column(String(2000), nullable=True)
 
-    # General delay between actions
     delay_seconds = Column(Integer, nullable=False, default=60)
     delay_unit = Column(
         Enum(WarmupDelayUnit, name="warmupdelayunit"),
@@ -56,9 +68,7 @@ class WarmupTask(Base):
         default=WarmupDelayUnit.seconds,
     )
 
-    # Email address to filter warmup messages by (optional)
     allowed_sender = Column(String(255), nullable=True)
-
     is_active = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(

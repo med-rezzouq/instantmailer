@@ -1,8 +1,7 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: "http://localhost:8000" });
+const api = axios.create({ baseURL: "/api" });
 
-// Attach token on every request
 api.interceptors.request.use((cfg) => {
   const raw = localStorage.getItem("mailforge-auth");
   if (raw) {
@@ -14,7 +13,6 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
-// Auto-refresh on 401
 api.interceptors.response.use(
   (res) => res,
   async (err) => {
@@ -24,10 +22,9 @@ api.interceptors.response.use(
       try {
         const raw = localStorage.getItem("mailforge-auth");
         const { refreshToken } = JSON.parse(raw);
-        const { data } = await axios.post(
-          "http://localhost:8000/auth/refresh",
-          { refresh_token: refreshToken },
-        );
+        const { data } = await axios.post("/api/auth/refresh", {
+          refresh_token: refreshToken,
+        });
         const stored = JSON.parse(localStorage.getItem("mailforge-auth"));
         stored.accessToken = data.access_token;
         stored.refreshToken = data.refresh_token;

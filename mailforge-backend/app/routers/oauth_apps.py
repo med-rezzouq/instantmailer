@@ -34,6 +34,7 @@ def to_oauth_app_out(app: OAuthApp) -> OAuthAppOut:
         is_active=app.is_active,
         owner_email=app.owner_email,
         project_id=app.project_id,
+        max_mailboxes=app.max_mailboxes,
         created_at=app.created_at,
         updated_at=app.updated_at,
     )
@@ -90,6 +91,7 @@ async def create_oauth_app(
         is_active=payload.is_active,
         owner_email=payload.owner_email,
         project_id=payload.project_id,
+        max_mailboxes=payload.max_mailboxes,
     )
     db.add(app)
     await db.commit()
@@ -115,6 +117,8 @@ async def update_oauth_app(
         raise HTTPException(status_code=404, detail="OAuth app not found")
 
     data = payload.model_dump(exclude_unset=True)
+
+    data.pop("max_mailboxes", None)
 
     for field, value in data.items():
         setattr(app, field, value)

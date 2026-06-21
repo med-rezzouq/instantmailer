@@ -1,5 +1,3 @@
-from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
-'''
 <template>
   <div>
     <div class="mb-6">
@@ -127,6 +125,33 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
+              <label class="form-label">
+                Contact Group <span class="text-red-500">*</span>
+              </label>
+              <select
+                :value="form.group_id ?? ''"
+                @change="onGroupChange"
+                class="form-input"
+                :class="{ 'border-red-500 focus:border-red-500': groupError }"
+              >
+                <option value="" disabled>Select a contact group...</option>
+                <option
+                  v-for="group in contactGroups"
+                  :key="group.id"
+                  :value="group.id"
+                >
+                  {{ group.name }}
+                </option>
+              </select>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Choose which contact group this campaign should target.
+              </p>
+              <p v-if="groupError" class="text-xs text-red-500 mt-1">
+                {{ groupError }}
+              </p>
+            </div>
+
+            <div>
               <label class="form-label">General Warm-up Delay</label>
               <div class="flex gap-2">
                 <input
@@ -203,49 +228,37 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
           </div>
 
           <div class="mb-4">
-            <label class="form-label">Segment Tags</label>
+            <label class="form-label">Labels / Segments</label>
 
-            <div class="flex gap-2 flex-wrap mb-2">
-              <span
-                v-for="tag in form.segment_tags"
-                :key="tag"
-                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary dark:bg-primary-dark/20 dark:text-primary-dark border border-primary/20 dark:border-primary-dark/30"
-              >
-                {{ tag }}
-                <button
-                  type="button"
-                  @click="removeTag(tag)"
-                  class="hover:text-red-500 transition-colors"
-                >
-                  <svg
-                    class="w-3 h-3"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                  >
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </span>
-            </div>
+            <Multiselect
+              v-model="selectedLabels"
+              mode="tags"
+              :options="mergedLabelOptions"
+              :searchable="true"
+              :filter-results="false"
+              :min-chars="1"
+              :resolve-on-load="true"
+              :delay="0"
+              :close-on-select="false"
+              :clear-on-select="false"
+              :hide-selected="false"
+              :create-option="true"
+              :loading="labelsLoading"
+              valueProp="id"
+              label="name"
+              trackBy="name"
+              disabledProp="disabled"
+              placeholder="Type to search labels..."
+              noOptionsText="Start typing to search labels"
+              noResultsText="No matching labels found"
+              @search-change="searchLabels"
+              @create="handleCreateLabel"
+            />
 
-            <div class="flex gap-2">
-              <input
-                v-model="tagInput"
-                @keydown.enter.prevent="addTag"
-                @keydown.comma.prevent="addTag"
-                class="form-input flex-1"
-                placeholder="Type a tag and press Enter..."
-              />
-              <button
-                type="button"
-                @click="addTag"
-                class="btn btn-ghost btn-sm"
-              >
-                Add
-              </button>
-            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Search existing labels from the database and select multiple.
+              Press Enter to create a new one if no match exists.
+            </p>
           </div>
 
           <div class="flex justify-end mt-4">
@@ -332,14 +345,12 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
       </div>
     </div>
 
-    <!-- Steps 1, 2, 3 remain same structurally (only using updated form) -->
-
     <div v-if="currentWizardStep === 1">
       <div class="card mb-4">
         <div class="font-bold text-sm mb-4">Initial Email Body</div>
 
         <div
-          class="flex gap-1 p-2 bg-surface-off dark:bg-surface-dark-off border border-border dark:border-border-dark border-b-0 rounded-t-lg flex-wrap"
+          class="relative flex gap-1 p-2 bg-surface-off dark:bg-surface-dark-off border border-border dark:border-border-dark border-b-0 rounded-t-lg flex-wrap"
         >
           <button
             v-for="t in toolbarBtns"
@@ -410,7 +421,6 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
 
     <div v-if="currentWizardStep === 2">
       <div v-for="(fu, idx) in followups" :key="fu.id" class="card mb-4">
-        <!-- followup config unchanged -->
         <div class="flex items-center justify-between mb-4">
           <div class="font-semibold">
             {{
@@ -552,6 +562,7 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                 </div>
                 <div class="text-sm font-semibold">{{ form.name }}</div>
               </div>
+
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -562,6 +573,18 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                   {{ form.subject }}
                 </div>
               </div>
+
+              <div
+                class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
+              >
+                <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Contact Group
+                </div>
+                <div class="text-sm font-semibold">
+                  {{ selectedGroupName }}
+                </div>
+              </div>
+
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -573,6 +596,7 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                   {{ form.general_warmup_delay_unit }}
                 </div>
               </div>
+
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -581,6 +605,7 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                 </div>
                 <div class="text-sm font-semibold">{{ form.max_bounces }}</div>
               </div>
+
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -591,6 +616,7 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                   {{ form.max_unsubscribes }}
                 </div>
               </div>
+
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off"
               >
@@ -601,16 +627,17 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                   {{ form.max_complaints }}
                 </div>
               </div>
+
               <div
                 class="p-3 rounded-lg bg-surface-off dark:bg-surface-dark-off md:col-span-2"
               >
                 <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  Segments
+                  Labels
                 </div>
                 <div class="text-sm font-semibold">
-                  <span v-if="!form.segment_tags.length" class="text-gray-400"
-                    >All contacts</span
-                  >
+                  <span v-if="!form.segment_tags.length" class="text-gray-400">
+                    All contacts
+                  </span>
                   <span v-else>{{ form.segment_tags.join(", ") }}</span>
                 </div>
               </div>
@@ -622,7 +649,6 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
           <div class="card mb-4">
             <div class="font-bold text-sm mb-4">Launch Campaign</div>
             <div class="space-y-3 mb-4">
-              <!-- Send now -->
               <label
                 class="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
               >
@@ -640,7 +666,6 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
                 </div>
               </label>
 
-              <!-- Draft -->
               <label
                 class="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-surface-off dark:hover:bg-surface-dark-off transition-colors"
               >
@@ -659,7 +684,6 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
               </label>
             </div>
 
-            <!-- Draft button -->
             <button
               v-if="sendMode === 'draft'"
               class="btn btn-ghost w-full mb-2"
@@ -675,7 +699,6 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
               }}
             </button>
 
-            <!-- Ready button -->
             <button
               v-if="sendMode === 'ready'"
               class="btn btn-primary w-full mb-2"
@@ -685,7 +708,6 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
               {{ saving ? "Saving..." : "Mark as Ready" }}
             </button>
 
-            <!-- Send now button -->
             <button
               v-if="sendMode === 'now'"
               class="btn btn-primary w-full"
@@ -706,8 +728,10 @@ from pathlib import Path out = Path('output') out.mkdir(exist_ok=True) content =
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from "vue";
+import { ref, computed, onMounted, nextTick, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import Multiselect from "@vueform/multiselect";
+import "@vueform/multiselect/themes/default.css";
 import api from "@/api";
 import { useToastStore } from "@/stores/toast";
 
@@ -722,12 +746,12 @@ const wizardSteps = [
   "Follow-ups",
   "Review & Send",
 ];
+
 const editor = ref(null);
 const initialHtmlBody = ref("<p></p>");
 const saving = ref(false);
 const sending = ref(false);
 const templates = ref([]);
-const tagInput = ref("");
 const showTokenMenu = ref(false);
 const expandedFollowup = ref(null);
 const sendMode = ref("now");
@@ -735,7 +759,16 @@ const followupEditorRefs = ref([]);
 const isEditMode = computed(() => !!route.params.id);
 const autosaving = computed(() => saving.value);
 
-const availableProviders = ref([]); // from /smtp
+const availableProviders = ref([]);
+const contactGroups = ref([]);
+const selectedLabels = ref([]);
+const labelOptions = ref([]);
+const labelsLoading = ref(false);
+const selectedLabelObjects = ref([]);
+const groupError = ref("");
+
+let labelsSearchTimeout = null;
+let latestLabelsQuery = "";
 
 const form = ref({
   name: "",
@@ -743,7 +776,8 @@ const form = ref({
   preview_text: "",
   from_name: "",
   reply_to: "",
-  provider_id: null, // chosen SMTP
+  provider_id: null,
+  group_id: null,
   segment_tags: [],
   max_bounces: 0,
   max_unsubscribes: 0,
@@ -771,7 +805,11 @@ const toolbarBtns = [
     label: "Bullet List",
     icon: "<span>• •</span>",
   },
-  { cmd: "insertOrderedList", label: "Numbered List", icon: "<span>1.</span>" },
+  {
+    cmd: "insertOrderedList",
+    label: "Numbered List",
+    icon: "<span>1.</span>",
+  },
 ];
 
 const personalizationTokens = [
@@ -811,6 +849,56 @@ const preflightChecks = computed(() => [
   },
 ]);
 
+const selectedGroupName = computed(() => {
+  if (form.value.group_id == null) return "All Contacts";
+  const group = contactGroups.value.find(
+    (g) => Number(g.id) === Number(form.value.group_id),
+  );
+  return group?.name || "Selected group";
+});
+
+const mergedLabelOptions = computed(() => {
+  const map = new Map();
+  const selectedIds = new Set(
+    (selectedLabels.value || []).map((v) => String(v)),
+  );
+
+  [...labelOptions.value, ...selectedLabelObjects.value].forEach((item) => {
+    if (!item) return;
+    const key = String(item.id ?? item.name);
+
+    if (!map.has(key)) {
+      map.set(key, {
+        ...item,
+        disabled: selectedIds.has(String(item.id)),
+      });
+    }
+  });
+
+  return Array.from(map.values());
+});
+
+watch(
+  selectedLabels,
+  (vals) => {
+    const optionMap = new Map(
+      mergedLabelOptions.value.map((item) => [String(item.id), item]),
+    );
+
+    const resolved = (vals || [])
+      .map((v) => {
+        if (v && typeof v === "object") return v;
+        return optionMap.get(String(v)) || null;
+      })
+      .filter(Boolean);
+
+    form.value.segment_tags = resolved
+      .map((item) => item?.name?.trim())
+      .filter(Boolean);
+  },
+  { deep: true },
+);
+
 onMounted(async () => {
   try {
     const templatesRes = await api.get("/templates?limit=20");
@@ -824,6 +912,14 @@ onMounted(async () => {
     console.error("Failed to load SMTP providers", e);
   }
 
+  try {
+    const labelsRes = await api.get("/labels", { params: { limit: 20 } });
+    labelOptions.value = labelsRes.data || [];
+  } catch (e) {
+    console.error("Failed to load labels", e);
+  }
+
+  await loadContactGroups();
   await nextTick();
 
   if (route.query.template && editor.value) {
@@ -835,6 +931,104 @@ onMounted(async () => {
     await loadCampaign(route.params.id);
   }
 });
+
+function validateGroupSelection() {
+  if (form.value.group_id == null) {
+    groupError.value = "Please select a contact group";
+    return false;
+  }
+  groupError.value = "";
+  return true;
+}
+
+async function loadContactGroups() {
+  try {
+    const { data } = await api.get("/contacts/groups");
+    contactGroups.value = data || [];
+  } catch (e) {
+    console.error("Failed to load contact groups", e);
+    contactGroups.value = [];
+  }
+}
+
+function onGroupChange(event) {
+  const value = event.target.value;
+  form.value.group_id = value === "" ? null : Number(value);
+
+  if (form.value.group_id != null) {
+    groupError.value = "";
+  }
+}
+async function searchLabels(query) {
+  latestLabelsQuery = query || "";
+
+  if (labelsSearchTimeout) {
+    clearTimeout(labelsSearchTimeout);
+  }
+
+  if (!latestLabelsQuery.trim()) {
+    try {
+      const { data } = await api.get("/labels", { params: { limit: 20 } });
+      labelOptions.value = data || [];
+    } catch {
+      labelOptions.value = [];
+    }
+    return;
+  }
+
+  labelsLoading.value = true;
+
+  labelsSearchTimeout = setTimeout(async () => {
+    try {
+      const { data } = await api.get("/labels", {
+        params: {
+          q: latestLabelsQuery,
+          limit: 20,
+        },
+      });
+
+      labelOptions.value = data || [];
+    } catch (e) {
+      console.error("Failed to search labels", e);
+      labelOptions.value = [];
+    } finally {
+      labelsLoading.value = false;
+    }
+  }, 250);
+}
+
+async function handleCreateLabel(newLabelName) {
+  const name = String(newLabelName || "").trim();
+  if (!name) return;
+
+  const existing = mergedLabelOptions.value.find(
+    (item) => item.name?.trim().toLowerCase() === name.toLowerCase(),
+  );
+
+  if (existing) {
+    const existsInSelected = (selectedLabels.value || []).some(
+      (item) => String(item) === String(existing.id),
+    );
+    if (!existsInSelected) {
+      selectedLabels.value = [...selectedLabels.value, existing.id];
+    }
+    return;
+  }
+
+  try {
+    const { data } = await api.post("/labels", {
+      name,
+      description: null,
+    });
+
+    labelOptions.value = [data, ...labelOptions.value];
+    selectedLabelObjects.value = [data, ...selectedLabelObjects.value];
+    selectedLabels.value = [...selectedLabels.value, data.id];
+    toast.show("Label created", "success");
+  } catch (e) {
+    toast.show(e.response?.data?.detail || e.message, "error");
+  }
+}
 
 async function goToStep(n) {
   currentWizardStep.value = n;
@@ -887,18 +1081,6 @@ function loadTemplate(t) {
   toast.show("Template loaded", "success");
 }
 
-function addTag() {
-  const tag = tagInput.value.trim().replace(/,$/, "");
-  if (tag && !form.value.segment_tags.includes(tag)) {
-    form.value.segment_tags.push(tag);
-  }
-  tagInput.value = "";
-}
-
-function removeTag(tag) {
-  form.value.segment_tags = form.value.segment_tags.filter((t) => t !== tag);
-}
-
 function addFollowup() {
   const id = Date.now();
   followups.value.push({
@@ -928,10 +1110,12 @@ function fillFormFromCampaign(campaign) {
   const orderedSteps = [...(campaign.steps || [])].sort(
     (a, b) => a.step_number - b.step_number,
   );
+
   const initialStep =
     orderedSteps.find((s) => s.step_type === "initial") ||
     orderedSteps[0] ||
     null;
+
   const followupSteps = orderedSteps.filter((s) => s.step_type !== "initial");
 
   form.value = {
@@ -941,6 +1125,7 @@ function fillFormFromCampaign(campaign) {
     from_name: campaign.from_name || "",
     reply_to: campaign.reply_to || "",
     provider_id: campaign.provider_id ?? null,
+    group_id: campaign.group_id ?? null,
     segment_tags: campaign.segment_tags || [],
     max_bounces: campaign.max_bounces ?? 0,
     max_unsubscribes: campaign.max_unsubscribes ?? 0,
@@ -949,6 +1134,31 @@ function fillFormFromCampaign(campaign) {
     general_warmup_delay_unit: campaign.general_warmup_delay_unit || "minutes",
     max_followups: campaign.max_followups ?? null,
   };
+
+  const byName = new Map(
+    (labelOptions.value || []).map((item) => [
+      item.name?.trim().toLowerCase(),
+      item,
+    ]),
+  );
+
+  selectedLabelObjects.value = (campaign.segment_tags || []).map((tag, idx) => {
+    const normalized = String(tag || "")
+      .trim()
+      .toLowerCase();
+    const existing = byName.get(normalized);
+
+    if (existing) {
+      return existing;
+    }
+
+    return {
+      id: `missing-${idx}-${tag}`,
+      name: tag,
+    };
+  });
+
+  selectedLabels.value = selectedLabelObjects.value.map((item) => item.id);
 
   const html = initialStep?.html_body || campaign.html_content || "<p></p>";
   initialHtmlBody.value = html;
@@ -977,7 +1187,9 @@ function fillFormFromCampaign(campaign) {
     if (editor.value) {
       editor.value.innerHTML = initialHtmlBody.value || "<p></p>";
     }
+
     followupEditorRefs.value = [];
+
     nextTick(() => {
       followupEditorRefs.value.forEach((el, idx) => {
         if (el && followups.value[idx]) {
@@ -1016,29 +1228,21 @@ function buildPayload() {
       const isReply = fu.is_reply_sequence;
       const stopOnReply = !!fu.stoponreply;
 
-      // Map UI flags to step_type
       let step_type;
       if (isReply) {
-        // Cases 1–2: reply sequence, regardless of stopOnReply
         step_type = "reply";
       } else if (!isReply && stopOnReply) {
-        // Case 3: normal followup that should stop if they reply
         step_type = "followup";
       } else {
-        // Case 4: neither reply sequence nor stop-on-reply → post-reply followup
         step_type = "post_reply_followup";
       }
 
-      // Map delay_from to match your semantics
       let delay_from;
       if (step_type === "reply") {
-        // Reply steps are anchored on their reply
         delay_from = "their_reply";
       } else if (step_type === "post_reply_followup") {
-        // Followup after we replied and they were silent
         delay_from = "our_reply";
       } else {
-        // Normal followups chained after previous step
         delay_from = "previous_step";
       }
 
@@ -1069,6 +1273,7 @@ function buildPayload() {
       };
     }),
   ];
+
   let status = null;
   if (sendMode.value === "draft") {
     status = "draft";
@@ -1083,6 +1288,7 @@ function buildPayload() {
     from_name: form.value.from_name,
     reply_to: form.value.reply_to,
     provider_id: form.value.provider_id,
+    group_id: form.value.group_id,
     segment_tags: form.value.segment_tags,
     track_opens: true,
     track_clicks: true,
@@ -1107,14 +1313,26 @@ function buildPayload() {
 }
 
 async function saveDraft() {
+  if (!validateGroupSelection()) {
+    currentWizardStep.value = 0;
+    toast.show("Please select a contact group", "error");
+    return;
+  }
+
   saving.value = true;
   try {
     const payload = buildPayload();
+
+    if (payload.status == null) {
+      delete payload.status;
+    }
+
     if (route.params.id) {
       await api.put(`/campaigns/${route.params.id}`, payload);
     } else {
       await api.post("/campaigns", payload);
     }
+
     toast.show("Draft saved!", "success");
     router.push("/campaigns");
   } catch (e) {
@@ -1125,24 +1343,38 @@ async function saveDraft() {
 }
 
 async function sendNow() {
+  if (!validateGroupSelection()) {
+    currentWizardStep.value = 0;
+    toast.show("Please select a contact group", "error");
+    return;
+  }
+
   if (!form.value.name) {
     toast.show("Campaign name is required", "error");
     return;
   }
+
   if (!form.value.subject) {
     toast.show("Subject line is required", "error");
     return;
   }
+
   if (
     !confirm(
       `Launch "${form.value.name}" with ${followups.value.length + 1} emails?`,
     )
-  )
+  ) {
     return;
+  }
 
   sending.value = true;
   try {
     const payload = buildPayload();
+
+    if (payload.status == null) {
+      delete payload.status;
+    }
+
     const campaign = route.params.id
       ? (await api.put(`/campaigns/${route.params.id}`, payload)).data
       : (await api.post("/campaigns", payload)).data;
@@ -1156,5 +1388,32 @@ async function sendNow() {
     sending.value = false;
   }
 }
+
+async function markReady() {
+  if (!validateGroupSelection()) {
+    currentWizardStep.value = 0;
+    toast.show("Please select a contact group", "error");
+    return;
+  }
+
+  saving.value = true;
+  try {
+    const payload = buildPayload();
+    payload.status = "ready";
+
+    let campaign;
+    if (route.params.id) {
+      campaign = (await api.put(`/campaigns/${route.params.id}`, payload)).data;
+    } else {
+      campaign = (await api.post("/campaigns", payload)).data;
+    }
+
+    toast.show("Campaign marked as ready!", "success");
+    router.push(`/campaigns/${campaign.id}`);
+  } catch (e) {
+    toast.show(e.response?.data?.detail || e.message, "error");
+  } finally {
+    saving.value = false;
+  }
+}
 </script>
-'''

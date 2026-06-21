@@ -6,7 +6,7 @@
         <div class="page-subtitle">{{ tasks.length }} tasks</div>
       </div>
       <div class="flex gap-3">
-        <button class="btn btn-primary" @click="openCreateModal">
+        <button class="btn btn-primary" @click="openCreateTypeModal">
           <svg
             class="w-4 h-4"
             viewBox="0 0 24 24"
@@ -34,6 +34,7 @@
           <tr class="bg-surface-off dark:bg-surface-dark-off">
             <th class="th">ID</th>
             <th class="th">Name</th>
+            <th class="th">Protocol</th>
             <th class="th">OAuth App</th>
             <th class="th">Mailboxes</th>
             <th class="th">Sender filter</th>
@@ -47,7 +48,7 @@
         <tbody>
           <tr v-if="loading">
             <td
-              colspan="10"
+              colspan="11"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               Loading...
@@ -56,7 +57,7 @@
 
           <tr v-else-if="!tasks.length">
             <td
-              colspan="10"
+              colspan="11"
               class="text-center py-12 text-gray-400 dark:text-gray-600"
             >
               No warmup tasks yet. Add your first one above.
@@ -78,8 +79,19 @@
             </td>
 
             <td class="td">
+              <span
+                class="badge"
+                :class="t.protocol === 'oauth' ? 'badge-sent' : 'badge-failed'"
+              >
+                {{ t.protocol === "oauth" ? "OAuth2" : "IMAP" }}
+              </span>
+            </td>
+
+            <td class="td">
               <div class="text-sm">
-                {{ oauthAppLabel(t.oauth_app_id) }}
+                {{
+                  t.protocol === "oauth" ? oauthAppLabel(t.oauth_app_id) : "—"
+                }}
               </div>
             </td>
 
@@ -93,7 +105,7 @@
                 </span>
                 <div v-else class="flex flex-col gap-0.5">
                   <span v-for="id in t.mailbox_ids" :key="id" class="truncate">
-                    • {{ mailboxLabel(id) }}
+                    • {{ mailboxLabel(id, t) }}
                   </span>
                 </div>
               </div>
@@ -110,20 +122,23 @@
 
             <td class="td text-xs">
               <div class="flex flex-wrap gap-1">
-                <span v-if="t.do_move_to_inbox" class="badge badge-sent"
-                  >Move to inbox</span
-                >
+                <span v-if="t.do_move_to_inbox" class="badge badge-sent">
+                  Move to inbox
+                </span>
                 <span v-if="t.do_open" class="badge badge-sent">Open</span>
-                <span v-if="t.do_add_to_favorites" class="badge badge-sent"
-                  >Favourites</span
-                >
-                <span v-if="t.do_mark_as_primary" class="badge badge-sent"
-                  >Mark as primary</span
-                >
+                <span v-if="t.do_add_to_favorites" class="badge badge-sent">
+                  Favourites
+                </span>
+                <span v-if="t.do_mark_as_primary" class="badge badge-sent">
+                  Mark as important
+                </span>
                 <span v-if="t.do_reply" class="badge badge-sent">Reply</span>
-                <span v-if="t.do_campaign_reply" class="badge badge-sent"
-                  >Campaign reply</span
-                >
+                <span v-if="t.do_campaign_reply" class="badge badge-sent">
+                  Campaign reply
+                </span>
+                <span v-if="t.do_detect_reply_event" class="badge badge-sent">
+                  Detect reply
+                </span>
               </div>
             </td>
 
@@ -164,6 +179,44 @@
     </div>
 
     <Teleport to="body">
+      <div
+        v-if="createTypeModalOpen"
+        class="modal-overlay"
+        @click.self="closeCreateTypeModal"
+      >
+        <div class="modal max-w-lg">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="font-bold">Choose Task Type</h2>
+            <button
+              @click="closeCreateTypeModal"
+              class="text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button class="protocol-card" @click="startCreateTask('oauth')">
+              <div class="text-lg font-semibold mb-1">OAuth2 Task</div>
+              <div class="text-sm text-gray-500">
+                For Gmail / Microsoft / Yahoo OAuth mailboxes with API-based
+                actions.
+              </div>
+            </button>
+
+            <button class="protocol-card" @click="startCreateTask('imap')">
+              <div class="text-lg font-semibold mb-1">IMAP Task</div>
+              <div class="text-sm text-gray-500">
+                For IMAP mailboxes. You can create the task without assigning
+                mailboxes first.
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
       <div v-if="modalOpen" class="modal-overlay" @click.self="closeModal">
         <div class="modal max-w-2xl">
           <div class="flex items-center justify-between mb-6">
@@ -178,6 +231,23 @@
             </button>
           </div>
 
+          <div class="mb-4">
+            <label class="form-label">Protocol</label>
+            <div class="flex gap-2">
+              <span
+                class="badge"
+                :class="
+                  form.protocol === 'oauth' ? 'badge-sent' : 'badge-failed'
+                "
+              >
+                {{ form.protocol === "oauth" ? "OAuth2" : "IMAP" }}
+              </span>
+            </div>
+            <p v-if="editingTask" class="text-xs text-gray-500 mt-1">
+              Protocol cannot be changed after task creation.
+            </p>
+          </div>
+
           <div class="grid grid-cols-2 gap-4 mb-4">
             <div>
               <label class="form-label">Task Name *</label>
@@ -188,7 +258,7 @@
               />
             </div>
 
-            <div>
+            <div v-if="form.protocol === 'oauth'">
               <label class="form-label">OAuth App *</label>
               <select
                 v-model="form.oauth_app_id"
@@ -211,30 +281,49 @@
               </p>
             </div>
 
+            <div v-else>
+              <label class="form-label">IMAP Mailboxes</label>
+              <div class="text-xs text-gray-500 mt-2">
+                You can leave this empty now and attach mailboxes later.
+              </div>
+            </div>
+
             <div>
               <label class="form-label">Mailboxes</label>
               <select
                 v-model="form.mailbox_ids"
                 class="form-input"
                 multiple
-                size="4"
-                :disabled="!form.oauth_app_id"
+                size="6"
+                :disabled="
+                  form.protocol === 'oauth' ? !form.oauth_app_id : false
+                "
               >
-                <option v-for="m in mailboxes" :key="m.id" :value="m.id">
-                  {{ m.email }}
-                  {{ m.display_name ? `(${m.display_name})` : "" }}
+                <option
+                  v-for="m in availableMailboxesForForm"
+                  :key="m.id"
+                  :value="m.id"
+                >
+                  {{ m.email
+                  }}{{ m.display_name ? ` (${m.display_name})` : "" }}
                 </option>
               </select>
               <p class="text-xs text-gray-500 mt-1">
-                Optional. Only mailboxes linked to the selected OAuth app are
-                shown.
+                Only mailboxes not already assigned to another task are shown.
+                When editing, this task’s current mailboxes remain available.
+              </p>
+              <p
+                v-if="!availableMailboxesForForm.length"
+                class="text-xs text-amber-600 mt-1"
+              >
+                No available mailboxes for this selection yet.
               </p>
             </div>
 
             <div>
-              <label class="form-label"
-                >Delay Between Actions (seconds) *</label
-              >
+              <label class="form-label">
+                Delay Between Actions (seconds) *
+              </label>
               <input
                 v-model.number="form.delay_seconds"
                 type="number"
@@ -275,10 +364,12 @@
                 />
                 Move warmup emails to inbox
               </label>
+
               <label class="inline-flex items-center">
                 <input v-model="form.do_open" type="checkbox" class="mr-2" />
                 Open warmup emails
               </label>
+
               <label class="inline-flex items-center">
                 <input
                   v-model="form.do_add_to_favorites"
@@ -287,19 +378,28 @@
                 />
                 Add to favourites / starred
               </label>
+
               <label class="inline-flex items-center">
                 <input
                   v-model="form.do_mark_as_primary"
                   type="checkbox"
                   class="mr-2"
                 />
-                Mark as primary
+                Mark as important
               </label>
-              <label class="inline-flex items-center">
+
+              <label
+                v-if="form.protocol === 'oauth'"
+                class="inline-flex items-center"
+              >
                 <input v-model="form.do_reply" type="checkbox" class="mr-2" />
                 Send reply
               </label>
-              <label class="inline-flex items-center">
+
+              <label
+                v-if="form.protocol === 'oauth'"
+                class="inline-flex items-center"
+              >
                 <input
                   v-model="form.do_campaign_reply"
                   type="checkbox"
@@ -307,10 +407,33 @@
                 />
                 Campaign reply
               </label>
+
+              <label class="inline-flex items-center">
+                <input
+                  v-model="form.do_detect_reply_event"
+                  type="checkbox"
+                  class="mr-2"
+                />
+                Detect reply event
+              </label>
             </div>
+
+            <p
+              v-if="form.protocol === 'imap'"
+              class="text-xs text-gray-500 mt-2"
+            >
+              IMAP tasks can use open, move to inbox, starred, and reply
+              detection. Reply sending actions remain OAuth-only.
+            </p>
           </div>
 
-          <div class="mb-6" v-if="form.do_reply || form.do_campaign_reply">
+          <div
+            class="mb-6"
+            v-if="
+              form.protocol === 'oauth' &&
+              (form.do_reply || form.do_campaign_reply)
+            "
+          >
             <label class="form-label">Reply message</label>
             <textarea
               v-model="form.reply_message"
@@ -340,12 +463,16 @@ import { useToastStore } from "@/stores/toast";
 
 const toast = useToastStore();
 
+type WarmupProtocol = "oauth" | "imap";
+type WarmupDelayUnit = "seconds" | "minutes" | "hours";
+
 interface MailboxOption {
   id: number;
   email: string;
   display_name: string | null;
   provider?: string | null;
   oauth_app_id?: number | null;
+  access_protocol?: string | null;
 }
 
 interface OAuthAppOption {
@@ -355,12 +482,13 @@ interface OAuthAppOption {
   provider: string | null;
 }
 
-type WarmupDelayUnit = "seconds" | "minutes" | "hours";
-
 interface WarmupTask {
   id: number;
   name: string;
+  protocol: WarmupProtocol;
   oauth_app_id: number | null;
+  oauth_app_name?: string | null;
+  oauth_app_provider?: string | null;
   mailbox_ids: number[];
   do_move_to_inbox: boolean;
   do_open: boolean;
@@ -368,6 +496,7 @@ interface WarmupTask {
   do_mark_as_primary: boolean;
   do_reply: boolean;
   do_campaign_reply: boolean;
+  do_detect_reply_event: boolean;
   reply_message: string | null;
   delay_seconds: number;
   delay_unit: WarmupDelayUnit;
@@ -384,10 +513,12 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const modalOpen = ref(false);
+const createTypeModalOpen = ref(false);
 const editingTask = ref<WarmupTask | null>(null);
 
 const form = ref({
   name: "",
+  protocol: "oauth" as WarmupProtocol,
   oauth_app_id: null as number | null,
   mailbox_ids: [] as number[],
   do_move_to_inbox: true,
@@ -396,6 +527,7 @@ const form = ref({
   do_mark_as_primary: false,
   do_reply: true,
   do_campaign_reply: false,
+  do_detect_reply_event: false,
   reply_message: "Thanks for your email!",
   delay_seconds: 60,
   delay_unit: "seconds" as WarmupDelayUnit,
@@ -403,14 +535,23 @@ const form = ref({
   is_active: true,
 });
 
+const mailboxDirectory = computed(() => {
+  const map = new Map<number, MailboxOption>();
+  for (const m of mailboxes.value) {
+    map.set(m.id, m);
+  }
+  return map;
+});
+
 const oauthAppsForForm = computed(() => {
+  if (form.value.protocol !== "oauth") return [];
+
   if (!editingTask.value) return allOauthApps.value;
 
   const currentId = editingTask.value.oauth_app_id;
   const found = allOauthApps.value.find((x) => x.id === currentId);
 
   if (found) return allOauthApps.value;
-
   if (currentId == null) return allOauthApps.value;
 
   return [
@@ -422,6 +563,30 @@ const oauthAppsForForm = computed(() => {
       provider: null,
     },
   ];
+});
+
+const usedMailboxIds = computed(() => {
+  const ids = new Set<number>();
+
+  for (const task of tasks.value) {
+    if (editingTask.value && task.id === editingTask.value.id) continue;
+    for (const mailboxId of task.mailbox_ids || []) {
+      ids.add(mailboxId);
+    }
+  }
+
+  return ids;
+});
+
+const currentEditingMailboxIds = computed(() => {
+  return new Set<number>(editingTask.value?.mailbox_ids || []);
+});
+
+const availableMailboxesForForm = computed(() => {
+  return mailboxes.value.filter((mailbox) => {
+    if (currentEditingMailboxIds.value.has(mailbox.id)) return true;
+    return !usedMailboxIds.value.has(mailbox.id);
+  });
 });
 
 function oauthOptionLabel(app: OAuthAppOption) {
@@ -437,37 +602,84 @@ function oauthAppLabel(oauthAppId: number | null) {
   return oauthOptionLabel(app);
 }
 
-function resetForm() {
-  form.value = {
+function defaultForm() {
+  return {
     name: "",
-    oauth_app_id: null,
-    mailbox_ids: [],
+    protocol: "oauth" as WarmupProtocol,
+    oauth_app_id: null as number | null,
+    mailbox_ids: [] as number[],
     do_move_to_inbox: true,
     do_open: true,
     do_add_to_favorites: false,
     do_mark_as_primary: false,
     do_reply: true,
     do_campaign_reply: false,
+    do_detect_reply_event: false,
     reply_message: "Thanks for your email!",
     delay_seconds: 60,
-    delay_unit: "seconds",
-    allowed_sender: "",
+    delay_unit: "seconds" as WarmupDelayUnit,
+    allowed_sender: "" as string | null,
     is_active: true,
   };
-  mailboxes.value = [];
-  editingTask.value = null;
 }
 
-async function openCreateModal() {
+function resetForm() {
+  form.value = defaultForm();
+  mailboxes.value = [];
+  editingTask.value = null;
+  error.value = null;
+}
+
+function applyProtocolDefaults(protocol: WarmupProtocol) {
+  form.value.protocol = protocol;
+  form.value.mailbox_ids = [];
+
+  if (protocol === "oauth") {
+    form.value.oauth_app_id = null;
+    form.value.do_reply = true;
+    form.value.do_campaign_reply = false;
+    form.value.do_detect_reply_event = false;
+    form.value.reply_message =
+      form.value.reply_message || "Thanks for your email!";
+  } else {
+    form.value.oauth_app_id = null;
+    form.value.do_reply = false;
+    form.value.do_campaign_reply = false;
+    form.value.do_detect_reply_event = false;
+    form.value.reply_message = null;
+  }
+}
+
+function openCreateTypeModal() {
+  createTypeModalOpen.value = true;
+}
+
+function closeCreateTypeModal() {
+  createTypeModalOpen.value = false;
+}
+
+async function startCreateTask(protocol: WarmupProtocol) {
+  closeCreateTypeModal();
   resetForm();
-  await loadAvailableOauthApps();
+  applyProtocolDefaults(protocol);
+
+  if (protocol === "oauth") {
+    await loadAvailableOauthApps();
+    mailboxes.value = [];
+  } else {
+    await loadImapMailboxes();
+  }
+
   modalOpen.value = true;
 }
 
 async function openEditModal(task: WarmupTask) {
+  error.value = null;
   editingTask.value = task;
+
   form.value = {
     name: task.name,
+    protocol: task.protocol,
     oauth_app_id: task.oauth_app_id,
     mailbox_ids: [...task.mailbox_ids],
     do_move_to_inbox: task.do_move_to_inbox,
@@ -476,35 +688,50 @@ async function openEditModal(task: WarmupTask) {
     do_mark_as_primary: task.do_mark_as_primary,
     do_reply: task.do_reply,
     do_campaign_reply: task.do_campaign_reply,
+    do_detect_reply_event: task.do_detect_reply_event,
     reply_message: task.reply_message || "",
     delay_seconds: task.delay_seconds,
     delay_unit: task.delay_unit,
     allowed_sender: task.allowed_sender || "",
     is_active: task.is_active,
   };
-  await loadAvailableOauthApps();
-  if (task.oauth_app_id) {
-    await loadMailboxesByOauthApp(task.oauth_app_id);
+
+  if (task.protocol === "oauth") {
+    await loadAvailableOauthApps();
+    if (task.oauth_app_id) {
+      await loadMailboxesByOauthApp(task.oauth_app_id);
+    } else {
+      mailboxes.value = [];
+    }
   } else {
-    mailboxes.value = [];
+    await loadImapMailboxes();
   }
+
   modalOpen.value = true;
 }
 
 function closeModal() {
   modalOpen.value = false;
+  resetForm();
 }
 
-function mailboxLabel(id: number) {
-  const m = mailboxes.value.find((x) => x.id === id);
-  if (!m) return `Mailbox ${id}`;
-  return m.display_name ? `${m.email} (${m.display_name})` : m.email;
+function mailboxLabel(id: number, task?: WarmupTask) {
+  const m = mailboxDirectory.value.get(id);
+  if (m) {
+    return m.display_name ? `${m.email} (${m.display_name})` : m.email;
+  }
+
+  if (task?.protocol === "oauth" && task.oauth_app_id) {
+    return `Mailbox ${id}`;
+  }
+
+  return `Mailbox ${id}`;
 }
 
 async function loadAvailableOauthApps() {
   try {
     const res = await api.get("/warmup-tasks/available-oauth-apps");
-    allOauthApps.value = res.data;
+    allOauthApps.value = res.data || [];
   } catch (e: any) {
     console.error(e);
     toast.show("Failed to load OAuth apps", "error");
@@ -516,7 +743,7 @@ async function loadMailboxesByOauthApp(oauthAppId: number) {
     const res = await api.get(
       `/warmup-tasks/mailboxes-by-oauth-app/${oauthAppId}`,
     );
-    mailboxes.value = res.data;
+    mailboxes.value = res.data || [];
   } catch (e: any) {
     console.error(e);
     mailboxes.value = [];
@@ -524,21 +751,49 @@ async function loadMailboxesByOauthApp(oauthAppId: number) {
   }
 }
 
+async function loadImapMailboxes() {
+  try {
+    const res = await api.get("/mailboxes");
+    mailboxes.value = (res.data || []).filter((m: MailboxOption) => {
+      const provider = (m.provider || "").toLowerCase();
+      const accessProtocol = (m.access_protocol || "").toLowerCase();
+
+      return (
+        accessProtocol === "imap" ||
+        provider === "imap" ||
+        (!m.oauth_app_id &&
+          provider !== "google" &&
+          provider !== "microsoft" &&
+          provider !== "yahoo")
+      );
+    });
+  } catch (e: any) {
+    console.error(e);
+    mailboxes.value = [];
+    toast.show("Failed to load IMAP mailboxes", "error");
+  }
+}
+
 async function onOauthAppChanged() {
+  if (form.value.protocol !== "oauth") return;
+
   form.value.mailbox_ids = [];
+
   if (!form.value.oauth_app_id) {
     mailboxes.value = [];
     return;
   }
+
   await loadMailboxesByOauthApp(form.value.oauth_app_id);
 }
 
 async function loadTasks() {
   loading.value = true;
   error.value = null;
+
   try {
     const res = await api.get("/warmup-tasks");
-    tasks.value = res.data;
+    tasks.value = res.data || [];
   } catch (e: any) {
     console.error(e);
     error.value = "Failed to load warmup tasks";
@@ -548,32 +803,22 @@ async function loadTasks() {
   }
 }
 
-async function saveTask() {
-  if (!form.value.name.trim()) {
-    toast.show("Task name is required", "error");
-    return;
-  }
-  if (!form.value.oauth_app_id) {
-    toast.show("Please select an OAuth app", "error");
-    return;
-  }
-  if (form.value.delay_seconds <= 0) {
-    toast.show("Delay must be positive", "error");
-    return;
-  }
-
-  const payload: Record<string, any> = {
+function buildBasePayload() {
+  return {
     name: form.value.name.trim(),
-    mailbox_ids: form.value.mailbox_ids,
+    mailbox_ids: [...form.value.mailbox_ids],
     do_move_to_inbox: form.value.do_move_to_inbox,
     do_open: form.value.do_open,
     do_add_to_favorites: form.value.do_add_to_favorites,
     do_mark_as_primary: form.value.do_mark_as_primary,
-    do_reply: form.value.do_reply,
-    do_campaign_reply: form.value.do_campaign_reply,
+    do_reply: form.value.protocol === "oauth" ? form.value.do_reply : false,
+    do_campaign_reply:
+      form.value.protocol === "oauth" ? form.value.do_campaign_reply : false,
+    do_detect_reply_event: form.value.do_detect_reply_event,
     reply_message:
-      form.value.do_reply || form.value.do_campaign_reply
-        ? form.value.reply_message
+      form.value.protocol === "oauth" &&
+      (form.value.do_reply || form.value.do_campaign_reply)
+        ? (form.value.reply_message || "").trim() || null
         : null,
     delay_seconds: form.value.delay_seconds,
     delay_unit: form.value.delay_unit,
@@ -582,26 +827,82 @@ async function saveTask() {
       : null,
     is_active: form.value.is_active,
   };
+}
 
-  if (!editingTask.value) {
-    payload.oauth_app_id = form.value.oauth_app_id;
+function buildCreatePayload() {
+  if (form.value.protocol === "oauth") {
+    return {
+      ...buildBasePayload(),
+      protocol: "oauth" as const,
+      oauth_app_id: form.value.oauth_app_id,
+    };
+  }
+
+  return {
+    ...buildBasePayload(),
+    protocol: "imap" as const,
+    oauth_app_id: null,
+  };
+}
+
+function buildUpdatePayload() {
+  return {
+    ...buildBasePayload(),
+  };
+}
+
+async function saveTask() {
+  error.value = null;
+
+  if (!form.value.name.trim()) {
+    toast.show("Task name is required", "error");
+    return;
+  }
+
+  if (
+    form.value.protocol === "oauth" &&
+    !form.value.oauth_app_id &&
+    !editingTask.value
+  ) {
+    toast.show("Please select an OAuth app", "error");
+    return;
+  }
+
+  if (form.value.protocol === "imap" && form.value.oauth_app_id) {
+    toast.show("IMAP tasks cannot have an OAuth app", "error");
+    return;
+  }
+
+  if (form.value.delay_seconds <= 0) {
+    toast.show("Delay must be positive", "error");
+    return;
   }
 
   try {
     if (editingTask.value) {
+      const payload = buildUpdatePayload();
       const res = await api.put(
         `/warmup-tasks/${editingTask.value.id}`,
         payload,
       );
+
       const idx = tasks.value.findIndex((t) => t.id === editingTask.value?.id);
-      if (idx !== -1) tasks.value[idx] = res.data;
+      if (idx !== -1) {
+        tasks.value[idx] = res.data;
+      } else {
+        await loadTasks();
+      }
+
       toast.show("Warmup task updated!", "success");
     } else {
+      const payload = buildCreatePayload();
+      console.log("CREATE warmup payload", JSON.stringify(payload, null, 2));
       const res = await api.post("/warmup-tasks", payload);
       tasks.value.push(res.data);
       toast.show("Warmup task created!", "success");
       await loadAvailableOauthApps();
     }
+
     closeModal();
   } catch (e: any) {
     console.error(e);
@@ -613,6 +914,7 @@ async function saveTask() {
 
 async function deleteTask(task: WarmupTask) {
   if (!confirm(`Delete warmup task "${task.name}"?`)) return;
+
   try {
     await api.delete(`/warmup-tasks/${task.id}`);
     tasks.value = tasks.value.filter((t) => t.id !== task.id);
@@ -644,5 +946,8 @@ onMounted(async () => {
 }
 .modal {
   @apply bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl p-8 w-full shadow-2xl;
+}
+.protocol-card {
+  @apply text-left rounded-2xl border border-border dark:border-border-dark p-5 hover:bg-surface-off dark:hover:bg-surface-dark-off transition;
 }
 </style>

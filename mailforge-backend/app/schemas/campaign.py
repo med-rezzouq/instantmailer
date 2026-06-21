@@ -20,7 +20,6 @@ class CampaignStepBase(BaseModel):
     stop_on_reply: bool = True
     is_active: bool = True
 
-    # NEW: only used for reply_followup steps
     wait_after_contact_reply_value: Optional[int] = Field(None, ge=0)
     wait_after_contact_reply_unit: Optional[DelayUnit] = None
 
@@ -41,11 +40,6 @@ class CampaignStepBase(BaseModel):
                     "Reply-related steps cannot use delay_from='previous_step'; "
                     "use their_reply, our_reply, or most_recent"
                 )
-            # optional: enforce that reply steps have contact-reply delay set
-            # if self.wait_after_contact_reply_value is None:
-            #     raise ValueError("reply_followup steps must define wait_after_contact_reply_value")
-            # if self.wait_after_contact_reply_unit is None:
-            #     raise ValueError("reply_followup steps must define wait_after_contact_reply_unit")
 
         return self
 
@@ -67,9 +61,9 @@ class CampaignStepUpdate(BaseModel):
     delay_from: Optional[DelayFrom] = None
     stop_on_reply: Optional[bool] = None
     is_active: Optional[bool] = None
-    # NEW
     wait_after_contact_reply_value: Optional[int] = Field(None, ge=0)
     wait_after_contact_reply_unit: Optional[DelayUnit] = None
+
 
 class CampaignStepOut(CampaignStepBase):
     id: int
@@ -78,6 +72,7 @@ class CampaignStepOut(CampaignStepBase):
 
     model_config = {"from_attributes": True}
 
+
 class InboundReplyIn(BaseModel):
     from_email: str
     to_email: str
@@ -85,16 +80,19 @@ class InboundReplyIn(BaseModel):
     text_body: Optional[str] = None
     html_body: Optional[str] = None
     occurred_at: Optional[datetime] = None
-
-    # NEW: simulated data from headers / message-id lookup
     step_id: Optional[int] = None
     step_number: Optional[int] = None
-    
+
+
 class CampaignCreate(BaseModel):
     name: str
     preview_text: Optional[str] = None
     from_name: Optional[str] = None
     reply_to: Optional[str] = None
+
+    provider_id: Optional[int] = None
+    group_id: Optional[int] = None
+
     segment_tags: List[str] = Field(default_factory=list)
     track_opens: bool = True
     track_clicks: bool = True
@@ -102,13 +100,11 @@ class CampaignCreate(BaseModel):
     parent_campaign_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
 
-    # NEW: selected SMTP provider for this campaign
-    provider_id: Optional[int] = None
-
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
     max_followups: Optional[int] = None
+
     general_warmup_delay_value: int = 10
     general_warmup_delay_unit: DelayUnit = DelayUnit.minutes
 
@@ -125,7 +121,9 @@ class CampaignCreate(BaseModel):
 
         sorted_steps = sorted(self.steps, key=lambda s: s.step_number)
 
-        initial_steps = [step for step in sorted_steps if step.step_type == StepType.initial]
+        initial_steps = [
+            step for step in sorted_steps if step.step_type == StepType.initial
+        ]
         if len(initial_steps) != 1:
             raise ValueError("Campaign must contain exactly one initial step")
 
@@ -148,6 +146,10 @@ class CampaignUpdate(BaseModel):
     from_name: Optional[str] = None
     reply_to: Optional[str] = None
     status: Optional[CampaignStatus] = None
+
+    provider_id: Optional[int] = None
+    group_id: Optional[int] = None
+
     segment_tags: Optional[List[str]] = None
     track_opens: Optional[bool] = None
     track_clicks: Optional[bool] = None
@@ -155,15 +157,14 @@ class CampaignUpdate(BaseModel):
     parent_campaign_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
 
-    # NEW: allow changing provider for an existing campaign
-    provider_id: Optional[int] = None
-
     max_bounces: Optional[int] = None
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
     max_followups: Optional[int] = None
+
     general_warmup_delay_value: Optional[int] = None
     general_warmup_delay_unit: Optional[DelayUnit] = None
+
     steps: Optional[List[CampaignStepCreate]] = None
 
     @model_validator(mode="after")
@@ -180,7 +181,9 @@ class CampaignUpdate(BaseModel):
 
         sorted_steps = sorted(self.steps, key=lambda s: s.step_number)
 
-        initial_steps = [step for step in sorted_steps if step.step_type == StepType.initial]
+        initial_steps = [
+            step for step in sorted_steps if step.step_type == StepType.initial
+        ]
         if len(initial_steps) != 1:
             raise ValueError("Campaign steps must contain exactly one initial step")
 
@@ -206,18 +209,20 @@ class CampaignOut(BaseModel):
     from_name: Optional[str] = None
     reply_to: Optional[str] = None
 
-    # NEW: expose chosen SMTP provider to frontend
     provider_id: Optional[int] = None
+    group_id: Optional[int] = None
 
     segment_tags: List[str] = Field(default_factory=list)
     track_opens: bool
     track_clicks: bool
     is_followup: bool
     parent_campaign_id: Optional[int] = None
+
     max_bounces: Optional[int] = 0
     max_complaints: Optional[int] = None
     max_unsubscribes: Optional[int] = None
     max_followups: Optional[int] = None
+
     stopped_by_condition: bool = False
     stop_reason: Optional[str] = None
 
@@ -228,17 +233,15 @@ class CampaignOut(BaseModel):
     updated_at: Optional[datetime] = None
     sent_at: Optional[datetime] = None
     scheduled_at: Optional[datetime] = None
-    # NEW: warm-up config returned to frontend
+
     general_warmup_delay_value: int
     general_warmup_delay_unit: DelayUnit
-    # temporary compatibility fields for frontend
+
     subject: Optional[str] = None
     html_content: Optional[str] = None
     plain_content: Optional[str] = None
     followup_count: int = 0
 
     steps: List[CampaignStepOut] = Field(default_factory=list)
-    
+
     model_config = {"from_attributes": True}
-
-

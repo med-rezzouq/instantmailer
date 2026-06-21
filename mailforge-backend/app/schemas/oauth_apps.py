@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ProviderLiteral = Literal["google", "microsoft"]
+ProviderLiteral = Literal["google", "microsoft", "yahoo", "aol"]
 
 
 class OAuthAppBase(BaseModel):
@@ -19,6 +19,7 @@ class OAuthAppBase(BaseModel):
 
 class OAuthAppCreate(OAuthAppBase):
     client_secret: str = Field(..., min_length=1)
+    max_mailboxes: int = Field(..., ge=1)
 
 
 class OAuthAppUpdate(BaseModel):
@@ -47,5 +48,6 @@ class OAuthAppOut(BaseModel):
     is_active: bool
     owner_email: str | None = None
     project_id: str | None = None
+    max_mailboxes: int
     created_at: datetime
     updated_at: datetime
